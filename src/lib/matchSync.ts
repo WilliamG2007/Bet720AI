@@ -7,6 +7,7 @@ import { COMPETITIONS, fetchUpcomingMatches, fetchStandings, fdMatchToDbMatch } 
 import type { FDStandingEntry } from './footballApi'
 import { parseStandings, computeMatchOdds, DEFAULT_MATCH_ODDS } from './poissonOdds'
 import type { StandingEntry } from './poissonOdds'
+import { computeWcOdds } from './wcStrength'
 import { format, addDays } from 'date-fns'
 import { fetchMatch } from './footballApi'
 
@@ -52,7 +53,9 @@ async function syncCompetition(compId: number, dateFrom: string, dateTo: string)
 
     const odds = (homeStr && awayStr && standingsData)
       ? computeMatchOdds(homeStr, awayStr, standingsData.leagueAvgHome, standingsData.leagueAvgAway)
-      : DEFAULT_MATCH_ODDS
+      : NO_STANDINGS.has(compId)
+        ? computeWcOdds(base.home_team, base.away_team) // tournament: rate by nation
+        : DEFAULT_MATCH_ODDS
 
     return {
       ...base,

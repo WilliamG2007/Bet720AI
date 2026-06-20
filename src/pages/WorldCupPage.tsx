@@ -9,6 +9,7 @@ import { TeamCrest } from '../components/TeamCrest'
 import { RiskBadge } from '../components/RiskBadge'
 import { fetchUpcomingMatches, fetchInPlayMatches, fetchRecentlyFinished, fdMatchToDbMatch, COMPETITIONS } from '../lib/footballApi'
 import { estimateLiveMinute, computeLiveOdds, DEFAULT_MATCH_ODDS } from '../lib/poissonOdds'
+import { computeWcOdds } from '../lib/wcStrength'
 import { format, isPast, isToday, isTomorrow } from 'date-fns'
 
 const GROUP_ORDER = [
@@ -28,6 +29,17 @@ const STAGE_LABELS: Record<string, string> = {
 
 function groupLabel(g: string): string {
   return g.replace('GROUP_', 'Group ')
+}
+
+/** Add nation-strength pre-match odds to a synced WC match row. */
+function withWcOdds(row: ReturnType<typeof fdMatchToDbMatch>): Record<string, unknown> {
+  const o = computeWcOdds(row.home_team, row.away_team)
+  return {
+    ...row,
+    home_odds: o.home, draw_odds: o.draw, away_odds: o.away,
+    btts_yes_odds: o.bttsYes, btts_no_odds: o.bttsNo,
+    expected_home_goals: o.homeExpected, expected_away_goals: o.awayExpected,
+  }
 }
 
 function kickoffLabel(d: string): string {
@@ -75,7 +87,7 @@ export default function WorldCupPage() {
       const today   = format(new Date(), 'yyyy-MM-dd')
       const end     = '2026-07-19'
       const raw     = await fetchUpcomingMatches(COMPETITIONS.WC.id, today, end)
-      const rows    = raw.map(fdMatchToDbMatch) as Record<string, unknown>[]
+      const rows    = raw.map(m => withWcOdds(fdMatchToDbMatch(m)))
       await supabase.from('matches').upsert(rows, { onConflict: 'external_id' })
     } catch (e) {
       console.error('WC sync error:', e)
@@ -89,7 +101,7 @@ export default function WorldCupPage() {
     try {
       const live = await fetchInPlayMatches(COMPETITIONS.WC.id)
       if (live.length) {
-        const rows = live.map(fdMatchToDbMatch) as Record<string, unknown>[]
+        const rows = live.map(m => withWcOdds(fdMatchToDbMatch(m)))
         const { error } = await supabase.from('matches').upsert(rows, { onConflict: 'external_id' })
         if (error) { console.error('Live upsert failed:', error); return }
         await loadMatches()

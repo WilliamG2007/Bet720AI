@@ -198,14 +198,13 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
                   const selected = resultPick === v
                   return (
                     <button key={v} onClick={() => setResultPick(v)} disabled={isLocked}
-                      className={`py-3.5 rounded-xl border text-center transition-all duration-100 ${
+                      className={`py-3.5 px-1 rounded-xl border text-center transition-all duration-100 ${
                         selected ? 'border-accent/50 bg-accent/10' : 'border-border hover:border-white/15'
                       }`}>
-                      <div className="text-[10px] text-muted font-semibold uppercase mb-0.5">
-                        {v === '1' ? 'Home' : v === '2' ? 'Away' : 'Draw'}
+                      <div className={`text-[11px] font-semibold leading-tight mb-1 truncate ${selected ? 'text-accent' : 'text-text'}`}>
+                        {v === '1' ? match.home_team : v === '2' ? match.away_team : 'Draw'}
                       </div>
-                      <div className={`font-mono font-bold text-lg ${selected ? 'text-accent' : 'text-text'}`}>{v}</div>
-                      <div className={`text-[11px] font-mono mt-0.5 ${selected ? 'text-accent/70' : 'text-muted/60'}`}>{fmtOdds(d)}</div>
+                      <div className={`text-[10px] font-mono mt-0.5 ${selected ? 'text-accent/70' : 'text-muted/60'}`}>{fmtOdds(d)}</div>
                     </button>
                   )
                 })}
