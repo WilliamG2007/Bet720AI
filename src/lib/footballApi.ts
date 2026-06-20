@@ -89,10 +89,18 @@ export async function fetchMatch(matchId: number): Promise<FDMatch> {
   return apiFetch<FDMatch>(`/matches/${matchId}`)
 }
 
-/** Fetch all live + just-finished matches for a competition (for in-play updates) */
-export async function fetchLiveCompetitionMatches(competitionId: number): Promise<FDMatch[]> {
+/** Fetch only in-play matches (fast, small) — for flipping status to live */
+export async function fetchInPlayMatches(competitionId: number): Promise<FDMatch[]> {
   const { matches } = await apiFetch<FDMatchesResponse>(
-    `/competitions/${competitionId}/matches?status=IN_PLAY,PAUSED,FINISHED`
+    `/competitions/${competitionId}/matches?status=IN_PLAY,PAUSED`
+  )
+  return matches
+}
+
+/** Fetch matches finished today (for resolving predictions) */
+export async function fetchRecentlyFinished(competitionId: number, dateFrom: string): Promise<FDMatch[]> {
+  const { matches } = await apiFetch<FDMatchesResponse>(
+    `/competitions/${competitionId}/matches?status=FINISHED&dateFrom=${dateFrom}&dateTo=${dateFrom}`
   )
   return matches
 }

@@ -7,7 +7,7 @@ import type { Match, Prediction } from '../types/database'
 import { PredictionModal } from '../components/PredictionModal'
 import { TeamCrest } from '../components/TeamCrest'
 import { RiskBadge } from '../components/RiskBadge'
-import { fetchUpcomingMatches, fetchLiveCompetitionMatches, fdMatchToDbMatch, COMPETITIONS } from '../lib/footballApi'
+import { fetchUpcomingMatches, fetchInPlayMatches, fetchRecentlyFinished, fdMatchToDbMatch, COMPETITIONS } from '../lib/footballApi'
 import { estimateLiveMinute, computeLiveOdds, DEFAULT_MATCH_ODDS } from '../lib/poissonOdds'
 import { format, isPast, isToday, isTomorrow } from 'date-fns'
 
@@ -84,26 +84,38 @@ export default function WorldCupPage() {
     setSyncing(false)
   }
 
-  /** Pull live + just-finished matches, update scores/status, resolve finished. */
+  /** Fast: flip in-play matches to live + refresh their scores. */
   async function syncLive() {
     try {
-      const raw = await fetchLiveCompetitionMatches(COMPETITIONS.WC.id)
-      if (!raw.length) return
-      const rows = raw.map(fdMatchToDbMatch) as Record<string, unknown>[]
-      await supabase.from('matches').upsert(rows, { onConflict: 'external_id' })
-
-      // Resolve any that just finished
-      const finished = raw.filter(m => m.status === 'FINISHED')
-      if (finished.length) {
-        const { data } = await supabase.from('matches').select('id, external_id')
-          .in('external_id', finished.map(m => m.id))
-        for (const row of (data ?? []) as { id: string }[]) {
-          await supabase.rpc('resolve_predictions', { p_match_id: row.id })
-        }
+      const live = await fetchInPlayMatches(COMPETITIONS.WC.id)
+      if (live.length) {
+        const rows = live.map(fdMatchToDbMatch) as Record<string, unknown>[]
+        const { error } = await supabase.from('matches').upsert(rows, { onConflict: 'external_id' })
+        if (error) { console.error('Live upsert failed:', error); return }
+        await loadMatches()
       }
-      await loadMatches()
     } catch (e) {
       console.error('WC live sync error:', e)
+    }
+  }
+
+  /** Slower: resolve predictions for matches finished today. */
+  async function resolveFinished() {
+    try {
+      const today    = format(new Date(), 'yyyy-MM-dd')
+      const finished = await fetchRecentlyFinished(COMPETITIONS.WC.id, today)
+      if (!finished.length) return
+      const rows = finished.map(fdMatchToDbMatch) as Record<string, unknown>[]
+      await supabase.from('matches').upsert(rows, { onConflict: 'external_id' })
+      const { data } = await supabase.from('matches').select('id')
+        .in('external_id', finished.map(m => m.id))
+      for (const row of (data ?? []) as { id: string }[]) {
+        await supabase.rpc('resolve_predictions', { p_match_id: row.id })
+      }
+      await loadMatches()
+      await loadPredictions()
+    } catch (e) {
+      console.error('WC resolve error:', e)
     }
   }
 
@@ -115,7 +127,8 @@ export default function WorldCupPage() {
       if (!count) await handleSync()
       else await loadMatches()
       await loadPredictions()
-      await syncLive()   // catch any in-play games on entry
+      await syncLive()        // flip any in-play games to live on entry
+      await resolveFinished() // settle anything that finished
     })()
   }, [authUser, activeLeague, tab])
 
@@ -259,7 +272,22 @@ export default function WorldCupPage() {
                 <span className="text-[10px] text-amber-400 font-bold font-mono">{minute}'</span>
               </div>
             )}
+
+            {/* Tap-to-bet chevron (bettable rows only) */}
+            {!locked && activeLeague && (
+              <svg className={`w-4 h-4 flex-shrink-0 ${isLive ? 'text-amber-400' : 'text-muted/40'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            )}
           </div>
+
+          {/* Explicit tap-to-bet hint for live matches */}
+          {isLive && !locked && activeLeague && (
+            <div className="mt-2 inline-flex items-center gap-1.5 bg-amber-500/15 text-amber-300 rounded-full px-2.5 py-1 text-[11px] font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+              Tap to place a live bet
+            </div>
+          )}
         </button>
 
         {/* Existing predictions for this match */}
