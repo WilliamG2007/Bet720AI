@@ -7,7 +7,8 @@ import type { Match, Prediction } from '../types/database'
 import { PredictionModal } from '../components/PredictionModal'
 import { TeamCrest } from '../components/TeamCrest'
 import { RiskBadge } from '../components/RiskBadge'
-import { fetchUpcomingMatches, fdMatchToDbMatch, COMPETITIONS } from '../lib/footballApi'
+import { fetchUpcomingMatches, fetchLiveCompetitionMatches, fdMatchToDbMatch, COMPETITIONS } from '../lib/footballApi'
+import { estimateLiveMinute, computeLiveOdds, DEFAULT_MATCH_ODDS } from '../lib/poissonOdds'
 import { format, isPast, isToday, isTomorrow } from 'date-fns'
 
 const GROUP_ORDER = [
@@ -83,17 +84,46 @@ export default function WorldCupPage() {
     setSyncing(false)
   }
 
+  /** Pull live + just-finished matches, update scores/status, resolve finished. */
+  async function syncLive() {
+    try {
+      const raw = await fetchLiveCompetitionMatches(COMPETITIONS.WC.id)
+      if (!raw.length) return
+      const rows = raw.map(fdMatchToDbMatch) as Record<string, unknown>[]
+      await supabase.from('matches').upsert(rows, { onConflict: 'external_id' })
+
+      // Resolve any that just finished
+      const finished = raw.filter(m => m.status === 'FINISHED')
+      if (finished.length) {
+        const { data } = await supabase.from('matches').select('id, external_id')
+          .in('external_id', finished.map(m => m.id))
+        for (const row of (data ?? []) as { id: string }[]) {
+          await supabase.rpc('resolve_predictions', { p_match_id: row.id })
+        }
+      }
+      await loadMatches()
+    } catch (e) {
+      console.error('WC live sync error:', e)
+    }
+  }
+
   useEffect(() => {
     ;(async () => {
-      // Auto-sync if no WC matches exist yet
       const { count } = await supabase
         .from('matches').select('id', { count: 'exact', head: true })
         .eq('competition', 'FIFA World Cup')
       if (!count) await handleSync()
       else await loadMatches()
       await loadPredictions()
+      await syncLive()   // catch any in-play games on entry
     })()
   }, [authUser, activeLeague, tab])
+
+  // Poll live matches every 30s while on the WC page
+  useEffect(() => {
+    const iv = setInterval(syncLive, 30_000)
+    return () => clearInterval(iv)
+  }, [])
 
   // Group upcoming by group/stage
   const liveMatches = matches.filter(m => m.status === 'live')
@@ -117,11 +147,45 @@ export default function WorldCupPage() {
 
   const hasUsedDouble = predictions.some(p => p.double_or_nothing)
 
-  function MatchRow({ m }: { m: Match }) {
+  /**
+   * Populate a match's odds fields. Live matches get fresh in-play odds from
+   * the live Poisson model (current score + estimated minute); scheduled
+   * matches use stored/default pre-match odds.
+   */
+  function withComputedOdds(m: Match): Match {
+    const homeExp = m.expected_home_goals ?? DEFAULT_MATCH_ODDS.homeExpected
+    const awayExp = m.expected_away_goals ?? DEFAULT_MATCH_ODDS.awayExpected
+
+    if (m.status === 'live') {
+      const minute = estimateLiveMinute(m.kickoff_at)
+      const o = computeLiveOdds(homeExp, awayExp, m.home_score ?? 0, m.away_score ?? 0, minute)
+      return {
+        ...m,
+        home_odds: o.home, draw_odds: o.draw, away_odds: o.away,
+        btts_yes_odds: o.bttsYes, btts_no_odds: o.bttsNo,
+        expected_home_goals: o.homeExpected, expected_away_goals: o.awayExpected,
+      }
+    }
+    return {
+      ...m,
+      home_odds:     m.home_odds     ?? DEFAULT_MATCH_ODDS.home,
+      draw_odds:     m.draw_odds     ?? DEFAULT_MATCH_ODDS.draw,
+      away_odds:     m.away_odds     ?? DEFAULT_MATCH_ODDS.away,
+      btts_yes_odds: m.btts_yes_odds ?? DEFAULT_MATCH_ODDS.bttsYes,
+      btts_no_odds:  m.btts_no_odds  ?? DEFAULT_MATCH_ODDS.bttsNo,
+      expected_home_goals: homeExp,
+      expected_away_goals: awayExp,
+    }
+  }
+
+  function MatchRow({ m: rawM }: { m: Match }) {
+    const m          = withComputedOdds(rawM)
     const preds      = predictions.filter(p => p.match_id === m.id)
     const isLive     = m.status === 'live'
     const isFinished = m.status === 'finished'
-    const locked     = isPast(new Date(m.kickoff_at)) || m.status !== 'scheduled'
+    // Live matches ARE bettable (in-play). Only finished/postponed lock.
+    const locked     = m.status === 'finished' || m.status === 'postponed'
+    const minute     = isLive ? estimateLiveMinute(m.kickoff_at) : 0
 
     return (
       <div>
@@ -149,45 +213,50 @@ export default function WorldCupPage() {
               </div>
             </div>
 
-            {/* Score / odds / status */}
+            {/* Score (live/finished) */}
+            {(isFinished || isLive) && (
+              <div className="space-y-1.5 flex-shrink-0">
+                <div className={`font-mono font-bold text-xl leading-none ${isLive ? 'text-amber-400' : 'text-text'}`}>
+                  {m.home_score ?? 0}
+                </div>
+                <div className={`font-mono font-bold text-xl leading-none ${isLive ? 'text-amber-400' : 'text-text'}`}>
+                  {m.away_score ?? 0}
+                </div>
+              </div>
+            )}
+
+            {/* Odds (scheduled + live) / kickoff time */}
             <div className="text-right flex-shrink-0 min-w-[72px]">
-              {isFinished || isLive ? (
-                <div className="space-y-1.5">
-                  <div className={`font-mono font-bold text-xl leading-none ${isLive ? 'text-amber-400' : 'text-text'}`}>
-                    {m.home_score ?? 0}
-                  </div>
-                  <div className={`font-mono font-bold text-xl leading-none ${isLive ? 'text-amber-400' : 'text-text'}`}>
-                    {m.away_score ?? 0}
-                  </div>
-                </div>
+              {isFinished ? (
+                <span className="text-[10px] text-muted/40 font-semibold uppercase">FT</span>
               ) : (
-                <div className="space-y-1">
-                  <p className="text-[10px] text-muted/50 font-mono">{kickoffLabel(m.kickoff_at)}</p>
-                  {m.home_odds && (
-                    <div className="flex flex-col gap-0.5 mt-1 items-end">
-                      {[
-                        { label: '1', val: m.home_odds },
-                        { label: 'X', val: m.draw_odds },
-                        { label: '2', val: m.away_odds },
-                      ].map(o => (
-                        <div key={o.label} className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-muted/40 font-mono w-3">{o.label}</span>
-                          <span className="text-[11px] font-mono font-semibold text-muted/80">
-                            {o.val?.toFixed(2) ?? '—'}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                <>
+                  {!isLive && (
+                    <p className="text-[10px] text-muted/50 font-mono mb-1">{kickoffLabel(m.kickoff_at)}</p>
                   )}
-                </div>
+                  <div className="flex flex-col gap-0.5 items-end">
+                    {[
+                      { label: '1', val: m.home_odds },
+                      { label: 'X', val: m.draw_odds },
+                      { label: '2', val: m.away_odds },
+                    ].map(o => (
+                      <div key={o.label} className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-muted/40 font-mono w-3">{o.label}</span>
+                        <span className={`text-[11px] font-mono font-semibold ${isLive ? 'text-amber-300' : 'text-muted/80'}`}>
+                          {o.val?.toFixed(2) ?? '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
 
-            {/* Live indicator */}
+            {/* Live indicator + minute */}
             {isLive && (
-              <div className="flex flex-col items-center gap-1 flex-shrink-0">
+              <div className="flex flex-col items-center gap-1 flex-shrink-0 min-w-[34px]">
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                <span className="text-[9px] text-amber-400 font-bold uppercase">Live</span>
+                <span className="text-[10px] text-amber-400 font-bold font-mono">{minute}'</span>
               </div>
             )}
           </div>

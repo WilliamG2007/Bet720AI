@@ -70,7 +70,9 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   const potential  = Math.round(points * finalMult)
   const maxLoss    = dbl ? points * 2 : points
 
-  const isLocked   = new Date(match.kickoff_at) <= new Date() || match.status !== 'scheduled'
+  // Live (in-play) matches remain bettable; only finished/postponed lock.
+  const isLive     = match.status === 'live'
+  const isLocked   = match.status === 'finished' || match.status === 'postponed'
   const existing   = existingPredictions.find(p => p.prediction_type === predType)
 
   function getValue() {
@@ -148,7 +150,17 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
         <div className="px-5 py-5 space-y-6">
           {isLocked && (
             <div className="bg-danger/8 border border-danger/20 rounded-xl px-4 py-3 text-danger text-sm font-medium">
-              Predictions locked — match has started.
+              Predictions locked — match has finished.
+            </div>
+          )}
+
+          {isLive && !isLocked && (
+            <div className="bg-amber-500/8 border border-amber-500/25 rounded-xl px-4 py-3 flex items-center gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+              <div>
+                <p className="text-amber-400 text-sm font-semibold">In-Play Betting · {match.home_score ?? 0}–{match.away_score ?? 0}</p>
+                <p className="text-[11px] text-muted mt-0.5">Odds reflect the live score &amp; time remaining. Locked in when you bet.</p>
+              </div>
             </div>
           )}
 

@@ -112,6 +112,75 @@ export function exactScoreDecimalOdds(
   return toDecimalOdds(Math.max(p, 0.002)) // floor at ~500x cap
 }
 
+/**
+ * Estimate the current match minute from kickoff time.
+ * The free football-data tier doesn't expose `minute`, so we derive it
+ * from elapsed wall-clock time, accounting for the ~15-min half-time break.
+ */
+export function estimateLiveMinute(kickoffISO: string): number {
+  const elapsed = (Date.now() - new Date(kickoffISO).getTime()) / 60000
+  if (elapsed <= 0)  return 0
+  if (elapsed <= 45) return Math.max(1, Math.floor(elapsed))     // first half
+  if (elapsed <= 60) return 45                                    // half-time window
+  return Math.min(90, Math.floor(elapsed - 15))                   // second half
+}
+
+/**
+ * In-play odds. Takes the PRE-MATCH full-90 expected goals, the CURRENT
+ * score, and the estimated minute, then models only the goals expected in
+ * the remaining time. The locked-in current score is added on top.
+ *
+ * As the clock runs down, remaining expected goals shrink → the leading
+ * side's win odds collapse toward 1.0 and the result hardens.
+ */
+export function computeLiveOdds(
+  homeExpFull: number,
+  awayExpFull: number,
+  curHome: number,
+  curAway: number,
+  minute: number,
+): MatchOdds {
+  const remFrac = Math.max(0, Math.min(1, (90 - minute) / 90))
+  const homeRem = homeExpFull * remFrac
+  const awayRem = awayExpFull * remFrac
+
+  const MAX = 9
+  let pHome = 0, pDraw = 0, pAway = 0
+
+  // Iterate over goals scored by each side in the REMAINING time
+  for (let h = 0; h <= MAX; h++) {
+    const ph = poissonPmf(homeRem, h)
+    for (let a = 0; a <= MAX; a++) {
+      const pa = poissonPmf(awayRem, a)
+      const joint = ph * pa
+      const finalH = curHome + h
+      const finalA = curAway + a
+      if (finalH > finalA) pHome += joint
+      else if (finalH === finalA) pDraw += joint
+      else pAway += joint
+    }
+  }
+
+  const sum = pHome + pDraw + pAway || 1
+  pHome /= sum; pDraw /= sum; pAway /= sum
+
+  // BTTS: a team has "scored" if it already has a goal, else needs ≥1 in remaining time
+  const pHomeEndsScoring = curHome > 0 ? 1 : (1 - poissonPmf(homeRem, 0))
+  const pAwayEndsScoring = curAway > 0 ? 1 : (1 - poissonPmf(awayRem, 0))
+  const pBttsYes = pHomeEndsScoring * pAwayEndsScoring
+
+  return {
+    home:          toDecimalOdds(pHome),
+    draw:          toDecimalOdds(pDraw),
+    away:          toDecimalOdds(pAway),
+    bttsYes:       toDecimalOdds(pBttsYes),
+    bttsNo:        toDecimalOdds(1 - pBttsYes),
+    // Expected FINAL goals = current + remaining (used for live exact-score odds)
+    homeExpected:  Math.round((curHome + homeRem) * 100) / 100,
+    awayExpected:  Math.round((curAway + awayRem) * 100) / 100,
+  }
+}
+
 /** Risk tier derived from the net-profit multiplier */
 export function oddsToRiskTier(multiplier: number): 'low' | 'medium' | 'high' {
   if (multiplier < 1.0) return 'low'      // odds < 2.0  (>50% probability)
