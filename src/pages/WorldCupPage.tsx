@@ -281,7 +281,7 @@ export default function WorldCupPage() {
             {isLive && (
               <div className="flex flex-col items-center gap-1 flex-shrink-0 min-w-[34px]">
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                <span className="text-[10px] text-amber-400 font-bold font-mono">{minute}'</span>
+                <span className="text-[10px] text-amber-400 font-bold font-mono">{minute >= 90 ? "90+'" : `${minute}'`}</span>
               </div>
             )}
 

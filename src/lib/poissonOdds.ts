@@ -140,7 +140,13 @@ export function computeLiveOdds(
   curAway: number,
   minute: number,
 ): MatchOdds {
-  const remFrac = Math.max(0, Math.min(1, (90 - minute) / 90))
+  // The free API gives no real match minute or added time, so the estimated
+  // minute caps at 90. Always assume a few minutes of stoppage remain while a
+  // match is live — otherwise a late lead/tie collapses to a fake certainty
+  // (odds hitting the 200x cap / 0.95 floor) even though the ball's still rolling.
+  const STOPPAGE_FLOOR_MINS = 4
+  const minsRemaining = Math.max(STOPPAGE_FLOOR_MINS, 90 - minute)
+  const remFrac = Math.min(1, minsRemaining / 90)
   const homeRem = homeExpFull * remFrac
   const awayRem = awayExpFull * remFrac
 
