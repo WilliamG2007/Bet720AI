@@ -1,0 +1,61 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+
+  body {
+    background-color: #0D0D0D;
+    color: #E0E0E0;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+  }
+
+  #root { min-height: 100svh; }
+
+  ::-webkit-scrollbar { width: 3px; height: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2A2A2A; border-radius: 99px; }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface rounded-2xl border border-border;
+  }
+  .card-hover {
+    @apply bg-surface rounded-2xl border border-border hover:border-border/80 transition-colors duration-150;
+  }
+  .btn-primary {
+    @apply bg-accent text-bg font-semibold px-5 py-2.5 rounded-xl hover:bg-accent-dim active:scale-[0.98] transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 text-sm;
+  }
+  .btn-ghost {
+    @apply bg-transparent text-text border border-border px-4 py-2.5 rounded-xl hover:bg-surface-2 active:scale-[0.98] transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed text-sm;
+  }
+  .btn-icon {
+    @apply w-9 h-9 flex items-center justify-center rounded-xl border border-border hover:bg-surface-2 text-muted hover:text-text transition-all duration-150;
+  }
+  .input {
+    @apply bg-surface-2 border border-border text-text rounded-xl px-3.5 py-2.5 w-full placeholder-muted/50 focus:outline-none focus:border-accent/50 focus:bg-surface transition-all duration-150 text-sm;
+  }
+  .label {
+    @apply block text-[10px] font-semibold text-muted uppercase tracking-widest mb-1.5;
+  }
+  .badge-low {
+    @apply text-[10px] font-mono font-medium px-1.5 py-0.5 rounded-md border border-white/10 text-muted/70 bg-white/5;
+  }
+  .badge-medium {
+    @apply text-[10px] font-mono font-medium px-1.5 py-0.5 rounded-md border border-amber-500/40 text-amber-400 bg-amber-500/10;
+  }
+  .badge-high {
+    @apply text-[10px] font-mono font-medium px-1.5 py-0.5 rounded-md border border-accent/50 text-accent bg-accent/10;
+  }
+  .num { @apply font-mono; }
+  .pill {
+    @apply text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full;
+  }
+}
