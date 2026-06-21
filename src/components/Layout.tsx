@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { Rss, Target, Shield, ReceiptText } from 'lucide-react'
+import { Analytics } from '@vercel/analytics/react'
 import { useLeague } from '../contexts/LeagueContext'
 import { ResolutionToast } from './ResolutionToast'
 
@@ -36,6 +37,7 @@ export function Layout() {
       </main>
 
       <ResolutionToast />
+      <Analytics />
 
       {/* Bottom Nav */}
       <nav className="flex-shrink-0 flex border-t border-border bg-bg/90 backdrop-blur-md pb-safe">
