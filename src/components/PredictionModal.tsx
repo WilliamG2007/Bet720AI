@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { X, Zap } from 'lucide-react'
+import { format, formatDistanceToNowStrict } from 'date-fns'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import type { Match, Prediction, PredictionType, RiskTier } from '../types/database'
@@ -88,6 +89,15 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   // Bets are one-shot: once placed, that prediction type is read-only.
   const alreadyPlaced = !!existing
 
+  // Pre-match bets only open within BET_WINDOW_MS of kickoff. Tighter
+  // windows mean users bet with closer-to-final info (lineups, weather,
+  // late injuries) instead of locking guesses in days ahead.
+  // TODO: add tiered windows (e.g. early-bird 24h tier at reduced multiplier).
+  const BET_WINDOW_MS = 3 * 60 * 60 * 1000
+  const kickoffMs   = new Date(match.kickoff_at).getTime()
+  const msToKickoff = kickoffMs - Date.now()
+  const tooEarly    = !isLive && !isLocked && msToKickoff > BET_WINDOW_MS
+
   // Impossible-pick gating for live matches.
   //  - BTTS "No"   → impossible once both teams have scored.
   //  - Exact score → can't pick a score lower than what's already on the board.
@@ -104,7 +114,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
     if (bttsNoImpossible && bttsPick === 'no') setBttsPick('yes')
   }, [bttsNoImpossible, bttsPick])
 
-  const formDisabled = isLocked || alreadyPlaced || oddsMissing
+  const formDisabled = isLocked || alreadyPlaced || oddsMissing || tooEarly
 
   function getValue() {
     if (predType === 'result') return resultPick
@@ -193,7 +203,19 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
             </div>
           )}
 
-          {oddsMissing && !isLocked && (
+          {tooEarly && (
+            <div className="bg-surface-2 border border-border rounded-xl px-4 py-3 flex items-center gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-muted/60 flex-shrink-0" />
+              <div>
+                <p className="text-text text-sm font-semibold">Bets open 3h before kickoff</p>
+                <p className="text-[11px] text-muted mt-0.5">
+                  Opens {format(new Date(kickoffMs - BET_WINDOW_MS), 'EEE HH:mm')} · kickoff in {formatDistanceToNowStrict(new Date(kickoffMs))}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {oddsMissing && !isLocked && !tooEarly && (
             <div className="bg-amber-500/8 border border-amber-500/25 rounded-xl px-4 py-3 flex items-center gap-2.5">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
               <div>
@@ -393,11 +415,13 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
               </span>
             ) : alreadyPlaced
               ? 'Bet locked in'
-              : oddsMissing
-                ? 'Loading odds…'
-                : pickImpossible
-                  ? 'Pick is impossible'
-                  : 'Lock In'}
+              : tooEarly
+                ? 'Bets open 3h before kickoff'
+                : oddsMissing
+                  ? 'Loading odds…'
+                  : pickImpossible
+                    ? 'Pick is impossible'
+                    : 'Lock In'}
           </button>
         </div>
       </div>
