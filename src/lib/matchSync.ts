@@ -93,16 +93,25 @@ export async function syncUpcomingMatches(): Promise<void> {
 export async function syncLiveMatches(): Promise<void> {
   const { data: liveRaw } = await supabase
     .from('matches')
-    .select('external_id, id')
+    .select('external_id, id, kickoff_at')
     .eq('status', 'live')
 
-  const liveMatches = (liveRaw ?? []) as { external_id: number; id: string }[]
+  const liveMatches = (liveRaw ?? []) as { external_id: number; id: string; kickoff_at: string }[]
   if (!liveMatches.length) return
+
+  // football-data.org's free tier sometimes keeps reporting a match as IN_PLAY
+  // long after it actually ended. If kickoff was more than ~3.5h ago (well past
+  // 90 + HT + stoppage + ET + pens), trust our clock over the stuck upstream
+  // status and force the match to finished using the last known score.
+  const MAX_LIVE_MS = 3.5 * 60 * 60 * 1000
+  const now = Date.now()
 
   for (const m of liveMatches) {
     try {
       const match = await fetchMatch(m.external_id)
       const row = fdMatchToDbMatch(match) as Record<string, unknown>
+
+      if (now - new Date(m.kickoff_at).getTime() > MAX_LIVE_MS) row.status = 'finished'
 
       await supabase
         .from('matches')
