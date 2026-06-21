@@ -202,6 +202,32 @@ export interface Database {
           reasoning?: string | null
         }
       }
+      notifications: {
+        Row: {
+          id: string
+          user_id: string
+          type: 'bet_settled' | 'rival_bet' | 'league_join'
+          payload: Json
+          read_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          type: 'bet_settled' | 'rival_bet' | 'league_join'
+          payload?: Json
+          read_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          type?: 'bet_settled' | 'rival_bet' | 'league_join'
+          payload?: Json
+          read_at?: string | null
+          created_at?: string
+        }
+      }
       feed_reactions: {
         Row: {
           id: string
@@ -236,6 +262,8 @@ export type LeagueMember = Database['public']['Tables']['league_members']['Row']
 export type Match = Database['public']['Tables']['matches']['Row']
 export type Prediction = Database['public']['Tables']['predictions']['Row']
 export type FeedReaction = Database['public']['Tables']['feed_reactions']['Row']
+export type Notification = Database['public']['Tables']['notifications']['Row']
+export type NotificationType = Notification['type']
 
 export type PredictionType = 'result' | 'exact_score' | 'btts'
 export type RiskTier = 'low' | 'medium' | 'high'

@@ -3,6 +3,7 @@ import { Rss, Target, Shield, ReceiptText } from 'lucide-react'
 import { Analytics } from '@vercel/analytics/react'
 import { useLeague } from '../contexts/LeagueContext'
 import { ResolutionToast } from './ResolutionToast'
+import { NotificationBell } from './NotificationBell'
 
 const NAV = [
   { to: '/',            icon: Rss,         label: 'Feed',    emoji: null },
@@ -23,12 +24,15 @@ export function Layout() {
           <span className="font-extrabold text-lg tracking-tight text-text">bet</span>
           <span className="font-extrabold text-lg tracking-tight text-accent">720</span>
         </div>
-        {activeLeague && (
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-accent" />
-            <span className="text-xs text-muted font-medium truncate max-w-[140px]">{activeLeague.name}</span>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {activeLeague && (
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-accent" />
+              <span className="text-xs text-muted font-medium truncate max-w-[140px]">{activeLeague.name}</span>
+            </div>
+          )}
+          <NotificationBell />
+        </div>
       </header>
 
       {/* Main */}
