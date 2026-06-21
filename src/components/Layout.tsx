@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Rss, Target, Trophy, Shield, ReceiptText } from 'lucide-react'
+import { Rss, Target, Shield, ReceiptText } from 'lucide-react'
 import { useLeague } from '../contexts/LeagueContext'
+import { ResolutionToast } from './ResolutionToast'
 
 const NAV = [
   { to: '/',            icon: Rss,         label: 'Feed',    emoji: null },
@@ -33,6 +34,8 @@ export function Layout() {
       <main className="flex-1 overflow-hidden flex flex-col">
         <Outlet />
       </main>
+
+      <ResolutionToast />
 
       {/* Bottom Nav */}
       <nav className="flex-shrink-0 flex border-t border-border bg-bg/90 backdrop-blur-md pb-safe">

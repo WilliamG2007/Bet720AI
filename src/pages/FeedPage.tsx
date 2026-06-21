@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { formatDistanceToNow } from 'date-fns'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLeague } from '../contexts/LeagueContext'
@@ -7,6 +8,7 @@ import type { Prediction, Match, User, FeedReaction } from '../types/database'
 import { Avatar } from '../components/Avatar'
 import { TeamCrest } from '../components/TeamCrest'
 import { RiskBadge } from '../components/RiskBadge'
+import { estimateLiveMinute } from '../lib/poissonOdds'
 
 interface FeedItem {
   prediction: Prediction
@@ -37,6 +39,7 @@ export default function FeedPage() {
   const { authUser } = useAuth()
   const { activeLeague } = useLeague()
   const [feed, setFeed] = useState<FeedItem[]>([])
+  const [liveMatches, setLiveMatches] = useState<Match[]>([])
   const [loading, setLoading] = useState(true)
 
   const loadFeed = useCallback(async () => {
@@ -78,15 +81,28 @@ export default function FeedPage() {
     setLoading(false)
   }, [activeLeague])
 
+  // Top-of-feed live strip: any match currently in-play across all comps
+  const loadLive = useCallback(async () => {
+    const { data } = await supabase
+      .from('matches').select('*')
+      .eq('status', 'live')
+      .order('kickoff_at', { ascending: true })
+      .limit(8)
+    setLiveMatches((data ?? []) as Match[])
+  }, [])
+
   useEffect(() => {
     loadFeed()
+    loadLive()
     if (!activeLeague) return
     const channel = supabase.channel(`feed:${activeLeague.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'predictions', filter: `league_id=eq.${activeLeague.id}` }, () => loadFeed())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'feed_reactions' }, () => loadFeed())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => loadLive())
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [activeLeague, loadFeed])
+    const iv = setInterval(loadLive, 20_000)
+    return () => { supabase.removeChannel(channel); clearInterval(iv) }
+  }, [activeLeague, loadFeed, loadLive])
 
   async function toggleReaction(predId: string, emoji: string, existing: FeedReaction[]) {
     if (!authUser) return
@@ -122,6 +138,56 @@ export default function FeedPage() {
             </div>
           </div>
         </div>
+
+        {/* Live strip — horizontal scroll of in-play matches, tap to go bet */}
+        {liveMatches.length > 0 && (
+          <div className="mb-5">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">
+                  {liveMatches.length} live
+                </span>
+              </div>
+              <Link to="/worldcup" className="text-[10px] font-semibold text-muted hover:text-text">View all →</Link>
+            </div>
+            <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1"
+              style={{ scrollbarWidth: 'none' }}>
+              {liveMatches.map(m => {
+                const min = estimateLiveMinute(m.kickoff_at)
+                return (
+                  <Link key={m.id} to="/worldcup"
+                    className="flex-shrink-0 w-44 card bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40 transition-colors p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="flex items-center gap-1 text-[10px] font-bold text-amber-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                        {min >= 90 ? "90+'" : `${min}'`}
+                      </span>
+                      <span className="text-[9px] font-mono text-muted/50 uppercase truncate ml-2">{m.competition}</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <TeamCrest src={m.home_crest} name={m.home_team} size={16} />
+                          <span className="text-xs font-semibold truncate">{m.home_team}</span>
+                        </div>
+                        <span className="font-mono font-bold text-sm text-amber-400 flex-shrink-0">{m.home_score ?? 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <TeamCrest src={m.away_crest} name={m.away_team} size={16} />
+                          <span className="text-xs font-semibold truncate">{m.away_team}</span>
+                        </div>
+                        <span className="font-mono font-bold text-sm text-amber-400 flex-shrink-0">{m.away_score ?? 0}</span>
+                      </div>
+                    </div>
+                    <div className="mt-2 text-[10px] text-amber-300 font-semibold">Tap to bet →</div>
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="space-y-3">

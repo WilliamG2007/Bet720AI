@@ -3,6 +3,9 @@
     { "source": "/fd-api/:path*", "destination": "/api/fd-api/:path*" },
     { "source": "/((?!api/).*)", "destination": "/" }
   ],
+  "crons": [
+    { "path": "/api/cron/sync", "schedule": "*/5 * * * *" }
+  ],
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite"

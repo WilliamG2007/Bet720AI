@@ -1,17 +1,31 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Copy, Check, Users, Plus, LogIn, Crown } from 'lucide-react'
+import { Copy, Check, Users, Plus, LogIn, Crown, Trophy } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLeague } from '../contexts/LeagueContext'
-import type { User, LeagueMember, League } from '../types/database'
+import type { User, LeagueMember, League, Prediction } from '../types/database'
 import { Avatar } from '../components/Avatar'
 
 interface MemberWithUser { member: LeagueMember; user: User }
+
+interface Standing {
+  member: LeagueMember
+  user: User
+  wins: number
+  total: number
+  winRate: number
+  streak: number
+  streakType: 'W' | 'L' | null
+}
+
+const MEDALS = ['🥇', '🥈', '🥉']
 
 export default function LeaguePage() {
   const { authUser } = useAuth()
   const { activeLeague, leagues, setActiveLeague, reload } = useLeague()
   const [members, setMembers] = useState<MemberWithUser[]>([])
+  const [standings, setStandings] = useState<Standing[]>([])
+  const [view, setView] = useState<'members' | 'leaderboard'>('members')
   const [copied, setCopied] = useState(false)
   const [tab, setTab] = useState<'overview' | 'create' | 'join'>('overview')
   const [createName, setCreateName] = useState('')
@@ -27,11 +41,32 @@ export default function LeaguePage() {
       const { data: dataRaw } = await supabase.from('league_members').select('*')
         .eq('league_id', activeLeague.id).order('total_points', { ascending: false })
       const data = (dataRaw ?? []) as LeagueMember[]
-      if (!data.length) { setMembers([]); return }
-      const { data: usersRaw } = await supabase.from('users').select('*').in('id', data.map(m => m.user_id))
+      if (!data.length) { setMembers([]); setStandings([]); return }
+      const userIds = data.map(m => m.user_id)
+      const { data: usersRaw } = await supabase.from('users').select('*').in('id', userIds)
       const users = (usersRaw ?? []) as User[]
       const userMap = Object.fromEntries(users.map(u => [u.id, u]))
       setMembers(data.map(m => ({ member: m, user: userMap[m.user_id] })).filter(x => x.user))
+
+      // Standings with win-rate + streak (powers Leaderboard view)
+      const { data: predsRaw } = await supabase.from('predictions').select('*')
+        .eq('league_id', activeLeague.id).eq('resolved', true).in('user_id', userIds)
+      const preds = (predsRaw ?? []) as Prediction[]
+      setStandings(data.map(m => {
+        const up = preds.filter(p => p.user_id === m.user_id)
+        const wins = up.filter(p => (p.points_won ?? 0) > 0).length
+        const total = up.length
+        const winRate = total > 0 ? Math.round((wins / total) * 100) : 0
+        const recent = [...up].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 5)
+        let streak = 0; let streakType: 'W' | 'L' | null = null
+        for (const p of recent) {
+          const isWin = (p.points_won ?? 0) > 0
+          if (streak === 0) { streakType = isWin ? 'W' : 'L'; streak = 1 }
+          else if ((streakType === 'W') === isWin) streak++
+          else break
+        }
+        return { member: m, user: userMap[m.user_id], wins, total, winRate, streak, streakType }
+      }).filter(s => s.user))
     })()
   }, [activeLeague])
 
@@ -163,37 +198,122 @@ export default function LeaguePage() {
               </div>
             </div>
 
-            {/* Members */}
-            <div className="card overflow-hidden">
-              <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-                <Users size={13} className="text-muted" />
-                <span className="text-xs font-semibold text-muted">{members.length} members</span>
-              </div>
-              <div className="divide-y divide-border">
-                {members.map(({ member, user }, idx) => (
-                  <div key={member.id} className="flex items-center gap-3 px-4 py-3.5">
-                    <span className="text-[10px] font-mono text-muted/40 w-4 text-center">{idx + 1}</span>
-                    <Avatar url={user?.avatar_url} username={user?.username ?? '?'} size={30} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-semibold truncate">{user?.username ?? 'Unknown'}</span>
-                        {user?.id === authUser?.id && (
-                          <span className="text-[9px] text-muted font-semibold uppercase tracking-wider">you</span>
-                        )}
-                        {user?.id === activeLeague.created_by && (
-                          <Crown size={11} className="text-amber-400 flex-shrink-0" />
-                        )}
-                      </div>
-                    </div>
-                    <span className={`font-mono text-sm font-bold ${
-                      member.total_points > 0 ? 'text-accent' : member.total_points < 0 ? 'text-danger' : 'text-muted/40'
-                    }`}>
-                      {member.total_points > 0 ? '+' : ''}{member.total_points}
-                    </span>
-                  </div>
-                ))}
-              </div>
+            {/* View toggle: Members / Leaderboard */}
+            <div className="flex gap-1 mb-3 bg-surface-2 rounded-xl p-1">
+              {(['members', 'leaderboard'] as const).map(v => (
+                <button key={v} onClick={() => setView(v)}
+                  className={`flex-1 py-2 rounded-lg text-xs font-semibold capitalize transition-all flex items-center justify-center gap-1.5 ${
+                    view === v ? 'bg-surface text-text shadow-sm' : 'text-muted hover:text-text'
+                  }`}>
+                  {v === 'members' ? <Users size={12} /> : <Trophy size={12} />}
+                  {v}
+                </button>
+              ))}
             </div>
+
+            {view === 'members' ? (
+              <div className="card overflow-hidden">
+                <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                  <Users size={13} className="text-muted" />
+                  <span className="text-xs font-semibold text-muted">{members.length} members</span>
+                </div>
+                <div className="divide-y divide-border">
+                  {members.map(({ member, user }, idx) => (
+                    <div key={member.id} className="flex items-center gap-3 px-4 py-3.5">
+                      <span className="text-[10px] font-mono text-muted/40 w-4 text-center">{idx + 1}</span>
+                      <Avatar url={user?.avatar_url} username={user?.username ?? '?'} size={30} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-semibold truncate">{user?.username ?? 'Unknown'}</span>
+                          {user?.id === authUser?.id && (
+                            <span className="text-[9px] text-muted font-semibold uppercase tracking-wider">you</span>
+                          )}
+                          {user?.id === activeLeague.created_by && (
+                            <Crown size={11} className="text-amber-400 flex-shrink-0" />
+                          )}
+                        </div>
+                      </div>
+                      <span className={`font-mono text-sm font-bold ${
+                        member.total_points > 0 ? 'text-accent' : member.total_points < 0 ? 'text-danger' : 'text-muted/40'
+                      }`}>
+                        {member.total_points > 0 ? '+' : ''}{member.total_points}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Top 3 podium */}
+                {standings.length >= 2 && (
+                  <div className="flex items-end gap-2 mb-4 px-2">
+                    {[1, 0, 2].map(idx => {
+                      const s = standings[idx]
+                      if (!s) return <div key={idx} className="flex-1" />
+                      const isMe = s.user?.id === authUser?.id
+                      const heights = ['h-20', 'h-28', 'h-16']
+                      const rank = idx + 1
+                      return (
+                        <div key={idx} className={`flex-1 flex flex-col items-center justify-end ${heights[idx]} rounded-xl border ${
+                          rank === 1 ? 'border-accent/30 bg-accent/5' : 'border-border bg-surface'
+                        } pb-3 px-2`}>
+                          <span className="text-xl mb-1">{MEDALS[idx]}</span>
+                          <Avatar url={s.user?.avatar_url} username={s.user?.username ?? '?'} size={28} />
+                          <p className={`text-[10px] font-semibold mt-1.5 truncate w-full text-center ${isMe ? 'text-accent' : 'text-text'}`}>
+                            {s.user?.username ?? '?'}
+                          </p>
+                          <p className={`font-mono font-bold text-sm mt-0.5 ${
+                            s.member.total_points > 0 ? 'text-accent' : s.member.total_points < 0 ? 'text-danger' : 'text-muted'
+                          }`}>
+                            {s.member.total_points > 0 ? '+' : ''}{s.member.total_points}
+                          </p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Full ranked list */}
+                <div className="card divide-y divide-border">
+                  {standings.map((s, idx) => {
+                    const isMe = s.user?.id === authUser?.id
+                    return (
+                      <div key={s.member.id} className={`flex items-center gap-3 px-4 py-3.5 ${isMe ? 'bg-accent/5' : ''}`}>
+                        <div className="w-6 text-center flex-shrink-0">
+                          {idx < 3
+                            ? <span className="text-base">{MEDALS[idx]}</span>
+                            : <span className="font-mono text-xs text-muted">{idx + 1}</span>
+                          }
+                        </div>
+                        <Avatar url={s.user?.avatar_url} username={s.user?.username ?? '?'} size={32} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-sm font-semibold truncate ${isMe ? 'text-accent' : 'text-text'}`}>
+                              {s.user?.username ?? 'Unknown'}
+                            </span>
+                            {isMe && <span className="text-[9px] text-muted font-semibold uppercase tracking-wider">you</span>}
+                          </div>
+                          <div className="flex items-center gap-2.5 mt-0.5">
+                            <span className="text-[10px] font-mono text-muted/60">{s.wins}/{s.total}</span>
+                            <span className="text-[10px] font-mono text-muted/60">{s.winRate}%</span>
+                            {s.streak > 1 && s.streakType && (
+                              <span className={`text-[10px] font-mono font-semibold ${s.streakType === 'W' ? 'text-accent' : 'text-danger'}`}>
+                                {s.streakType}{s.streak}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <span className={`font-mono font-bold text-base flex-shrink-0 ${
+                          s.member.total_points > 0 ? 'text-accent' : s.member.total_points < 0 ? 'text-danger' : 'text-muted'
+                        }`}>
+                          {s.member.total_points > 0 ? '+' : ''}{s.member.total_points}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

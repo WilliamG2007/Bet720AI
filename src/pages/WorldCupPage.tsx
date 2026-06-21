@@ -59,6 +59,7 @@ export default function WorldCupPage() {
   const [loading, setLoading]         = useState(true)
   const [syncing, setSyncing]         = useState(false)
   const [tab, setTab]                 = useState<'upcoming' | 'live' | 'results'>('upcoming')
+  const [upcomingSort, setUpcomingSort] = useState<'group' | 'date'>('group')
 
   async function loadMatches() {
     setLoading(true)
@@ -199,13 +200,14 @@ export default function WorldCupPage() {
 
   // Group upcoming by group/stage
   const liveMatches = matches.filter(m => m.status === 'live')
-  const upcomingGrouped = matches
+  const upcomingList = matches
     .filter(m => !isPast(new Date(m.kickoff_at)) || m.status === 'scheduled')
-    .reduce<Record<string, Match[]>>((acc, m) => {
-      const key = m.group ? groupLabel(m.group) : (STAGE_LABELS[m.stage ?? ''] ?? m.stage ?? 'Other')
-      ;(acc[key] ??= []).push(m)
-      return acc
-    }, {})
+
+  const upcomingGrouped = upcomingList.reduce<Record<string, Match[]>>((acc, m) => {
+    const key = m.group ? groupLabel(m.group) : (STAGE_LABELS[m.stage ?? ''] ?? m.stage ?? 'Other')
+    ;(acc[key] ??= []).push(m)
+    return acc
+  }, {})
 
   // Sort groups by canonical order
   const sortedGroups = Object.keys(upcomingGrouped).sort((a, b) => {
@@ -216,6 +218,21 @@ export default function WorldCupPage() {
     if (bi === -1) return -1
     return ai - bi
   })
+
+  // Date-mode sections: Today / Tomorrow / Later
+  const upcomingByDate = upcomingList
+    .slice()
+    .sort((a, b) => new Date(a.kickoff_at).getTime() - new Date(b.kickoff_at).getTime())
+    .reduce<{ today: Match[]; tomorrow: Match[]; later: Match[] }>(
+      (acc, m) => {
+        const d = new Date(m.kickoff_at)
+        if (isToday(d))         acc.today.push(m)
+        else if (isTomorrow(d)) acc.tomorrow.push(m)
+        else                    acc.later.push(m)
+        return acc
+      },
+      { today: [], tomorrow: [], later: [] }
+    )
 
   const hasUsedDouble = predictions.some(p => p.double_or_nothing)
 
@@ -250,7 +267,7 @@ export default function WorldCupPage() {
     }
   }
 
-  function MatchRow({ m: rawM }: { m: Match }) {
+  function MatchRow({ m: rawM, showDayBadge = false }: { m: Match; showDayBadge?: boolean }) {
     const m          = withComputedOdds(rawM)
     const preds      = predictions.filter(p => p.match_id === m.id)
     const isLive     = m.status === 'live'
@@ -258,16 +275,29 @@ export default function WorldCupPage() {
     // Live matches ARE bettable (in-play). Only finished/postponed lock.
     const locked     = m.status === 'finished' || m.status === 'postponed'
     const minute     = isLive ? estimateLiveMinute(m.kickoff_at) : 0
+    const ko         = new Date(m.kickoff_at)
+    const isToday_   = !isLive && !isFinished && isToday(ko)
+    const isTmrw_    = !isLive && !isFinished && isTomorrow(ko)
 
     return (
-      <div>
+      <div className={isToday_ ? 'border-l-2 border-accent' : isTmrw_ ? 'border-l-2 border-accent/40' : ''}>
         <button
           onClick={() => !locked && activeLeague && setSelected(m)}
           disabled={locked || !activeLeague}
           className={`w-full text-left px-4 py-3.5 transition-colors hover:bg-surface-2/50 ${
-            isLive ? 'bg-amber-500/5' : ''
+            isLive ? 'bg-amber-500/5' : isToday_ ? 'bg-accent/5' : ''
           } disabled:cursor-default`}
         >
+          {showDayBadge && (isToday_ || isTmrw_) && (
+            <div className="mb-2">
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                isToday_ ? 'bg-accent/20 text-accent' : 'bg-accent/10 text-accent/80'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${isToday_ ? 'bg-accent animate-pulse' : 'bg-accent/60'}`} />
+                {isToday_ ? 'Today' : 'Tomorrow'} · {format(ko, 'HH:mm')}
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3">
             {/* Teams */}
             <div className="flex-1 min-w-0 space-y-2">
@@ -429,20 +459,81 @@ export default function WorldCupPage() {
             {[...Array(4)].map((_, i) => <div key={i} className="card p-4 animate-pulse h-24 bg-surface-2" />)}
           </div>
         ) : tab === 'upcoming' ? (
-          sortedGroups.length === 0 ? (
+          upcomingList.length === 0 ? (
             <div className="text-center py-16">
               <p className="text-text font-semibold">No upcoming matches</p>
               <button onClick={handleSync} className="btn-ghost mt-4 text-sm">Sync now</button>
             </div>
           ) : (
-            sortedGroups.map(grp => (
-              <div key={grp} className="mb-5">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted/60 mb-2">{grp}</p>
-                <div className="card divide-y divide-border overflow-hidden">
-                  {upcomingGrouped[grp].map(m => <MatchRow key={m.id} m={m} />)}
+            <>
+              {/* Sort toggle + Today/Tomorrow quick stats */}
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2 text-[11px]">
+                  {upcomingByDate.today.length > 0 && (
+                    <span className="inline-flex items-center gap-1.5 bg-accent/15 text-accent rounded-full px-2.5 py-1 font-semibold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                      {upcomingByDate.today.length} today
+                    </span>
+                  )}
+                  {upcomingByDate.tomorrow.length > 0 && (
+                    <span className="inline-flex items-center gap-1.5 bg-accent/8 text-accent/80 rounded-full px-2.5 py-1 font-semibold">
+                      {upcomingByDate.tomorrow.length} tomorrow
+                    </span>
+                  )}
+                </div>
+                <div className="flex bg-surface-2 rounded-lg p-0.5">
+                  {(['group', 'date'] as const).map(s => (
+                    <button key={s} onClick={() => setUpcomingSort(s)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold capitalize transition-all ${
+                        upcomingSort === s ? 'bg-surface text-text shadow-sm' : 'text-muted'
+                      }`}>
+                      {s === 'group' ? 'By Group' : 'By Date'}
+                    </button>
+                  ))}
                 </div>
               </div>
-            ))
+
+              {upcomingSort === 'group' ? (
+                sortedGroups.map(grp => (
+                  <div key={grp} className="mb-5">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted/60 mb-2">{grp}</p>
+                    <div className="card divide-y divide-border overflow-hidden">
+                      {upcomingGrouped[grp].map(m => <MatchRow key={m.id} m={m} />)}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <>
+                  {upcomingByDate.today.length > 0 && (
+                    <div className="mb-5">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-accent mb-2 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                        Today
+                      </p>
+                      <div className="card divide-y divide-border overflow-hidden ring-1 ring-accent/30">
+                        {upcomingByDate.today.map(m => <MatchRow key={m.id} m={m} showDayBadge />)}
+                      </div>
+                    </div>
+                  )}
+                  {upcomingByDate.tomorrow.length > 0 && (
+                    <div className="mb-5">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-accent/70 mb-2">Tomorrow</p>
+                      <div className="card divide-y divide-border overflow-hidden">
+                        {upcomingByDate.tomorrow.map(m => <MatchRow key={m.id} m={m} showDayBadge />)}
+                      </div>
+                    </div>
+                  )}
+                  {upcomingByDate.later.length > 0 && (
+                    <div className="mb-5">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-muted/60 mb-2">Later</p>
+                      <div className="card divide-y divide-border overflow-hidden">
+                        {upcomingByDate.later.map(m => <MatchRow key={m.id} m={m} />)}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
           )
         ) : tab === 'live' ? (
           liveMatches.length === 0 ? (
