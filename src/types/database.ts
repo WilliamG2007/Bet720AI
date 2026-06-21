@@ -167,6 +167,7 @@ export interface Database {
           resolved: boolean
           created_at: string
           odds_multiplier: number
+          reasoning: string | null
         }
         Insert: {
           id?: string
@@ -182,6 +183,7 @@ export interface Database {
           resolved?: boolean
           created_at?: string
           odds_multiplier?: number
+          reasoning?: string | null
         }
         Update: {
           id?: string
@@ -197,6 +199,7 @@ export interface Database {
           resolved?: boolean
           created_at?: string
           odds_multiplier?: number
+          reasoning?: string | null
         }
       }
       feed_reactions: {

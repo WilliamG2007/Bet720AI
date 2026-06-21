@@ -39,6 +39,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   const [awayScore, setAwayScore]   = useState(() => String(curAwayLive))
   const [points, setPoints]         = useState(25)
   const [dbl, setDbl]               = useState(false)
+  const [reasoning, setReasoning]   = useState('')
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState('')
 
@@ -75,7 +76,19 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   }
 
   const decOdds    = currentDecimalOdds()
-  const netMult    = decimalToMultiplier(decOdds)            // profit multiplier (decimal - 1)
+  let   netMult    = decimalToMultiplier(decOdds)            // profit multiplier (decimal - 1)
+
+  // Early-bird tier: 24h–3h before kickoff pays out 0.75x to compensate
+  // for the user betting before late info (lineups, injuries) is known.
+  // Mirrors the EARLY_BIRD_FACTOR in place_bet so the previewed potential
+  // matches what the server will actually pay.
+  const kickoffMs    = new Date(match.kickoff_at).getTime()
+  const msToKickoff  = kickoffMs - Date.now()
+  const STANDARD_MS  = 3 * 60 * 60 * 1000
+  const EARLY_BIRD_MS = 24 * 60 * 60 * 1000
+  const isEarlyBird  = msToKickoff > STANDARD_MS && msToKickoff <= EARLY_BIRD_MS
+  if (isEarlyBird) netMult = Math.max(0.1, Math.round(netMult * 0.75 * 100) / 100)
+
   const finalMult  = dbl ? netMult * 2 : netMult
   const riskTier: RiskTier = oddsToRiskTier(netMult)
 
@@ -91,14 +104,10 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   // Bets are one-shot: once placed, that prediction type is read-only.
   const alreadyPlaced = !!existing
 
-  // Pre-match bets only open within BET_WINDOW_MS of kickoff. Tighter
-  // windows mean users bet with closer-to-final info (lineups, weather,
-  // late injuries) instead of locking guesses in days ahead.
-  // TODO: add tiered windows (e.g. early-bird 24h tier at reduced multiplier).
-  const BET_WINDOW_MS = 3 * 60 * 60 * 1000
-  const kickoffMs   = new Date(match.kickoff_at).getTime()
-  const msToKickoff = kickoffMs - Date.now()
-  const tooEarly    = !isLive && !isLocked && msToKickoff > BET_WINDOW_MS
+  // Bet window opens at 24h before kickoff. Anything in the 24h–3h band
+  // pays out at 0.75x (early-bird tier, handled above). msToKickoff /
+  // kickoffMs are declared earlier for the multiplier calc.
+  const tooEarly    = !isLive && !isLocked && msToKickoff > EARLY_BIRD_MS
 
   // Impossible-pick gating for live matches.
   //  - BTTS "No"   → impossible once both teams have scored.
@@ -136,6 +145,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
     }
     setPoints(existing.points_wagered)
     setDbl(existing.double_or_nothing)
+    setReasoning(existing.reasoning ?? '')
   }, [predType])
 
   async function handleSubmit() {
@@ -153,6 +163,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
       p_predicted_value:  getValue(),
       p_points_wagered:   points,
       p_double_or_nothing: dbl,
+      p_reasoning:        reasoning.trim() || null,
     })
 
     if (err) {
@@ -212,9 +223,21 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
             <div className="bg-surface-2 border border-border rounded-xl px-4 py-3 flex items-center gap-2.5">
               <span className="w-2 h-2 rounded-full bg-muted/60 flex-shrink-0" />
               <div>
-                <p className="text-text text-sm font-semibold">Bets open 3h before kickoff</p>
+                <p className="text-text text-sm font-semibold">Bets open 24h before kickoff</p>
                 <p className="text-[11px] text-muted mt-0.5">
-                  Opens {format(new Date(kickoffMs - BET_WINDOW_MS), 'EEE HH:mm')} · kickoff in {formatDistanceToNowStrict(new Date(kickoffMs))}
+                  Opens {format(new Date(kickoffMs - EARLY_BIRD_MS), 'EEE HH:mm')} · kickoff in {formatDistanceToNowStrict(new Date(kickoffMs))}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {isEarlyBird && !isLocked && (
+            <div className="bg-amber-500/8 border border-amber-500/25 rounded-xl px-4 py-3 flex items-center gap-2.5">
+              <span className="text-lg flex-shrink-0">🐦</span>
+              <div>
+                <p className="text-amber-400 text-sm font-semibold">Early Bird · payout × 0.75</p>
+                <p className="text-[11px] text-muted mt-0.5">
+                  Bet now or wait for lineups within 3h of kickoff for full payout · kickoff in {formatDistanceToNowStrict(new Date(kickoffMs))}
                 </p>
               </div>
             </div>
@@ -408,6 +431,22 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
             </div>
           </button>
 
+          {/* Hot take — optional 140-char rationale shown in feed */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="label !mb-0">Hot Take <span className="text-muted/50 font-normal normal-case tracking-normal">· optional</span></p>
+              <span className="text-[10px] font-mono text-muted/50">{reasoning.length}/140</span>
+            </div>
+            <textarea
+              value={reasoning}
+              onChange={e => setReasoning(e.target.value.slice(0, 140))}
+              disabled={formDisabled}
+              placeholder="Why this pick? (shown in the feed)"
+              rows={2}
+              className="w-full bg-surface-2 border border-border rounded-xl px-3 py-2 text-sm text-text placeholder:text-muted/40 focus:border-accent/40 focus:outline-none disabled:opacity-40 resize-none"
+            />
+          </div>
+
           {error && <p className="text-danger text-sm">{error}</p>}
 
           <button onClick={handleSubmit}
@@ -425,7 +464,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
                 : match.status === 'finished' || match.status === 'postponed'
                   ? 'Match is over'
                   : tooEarly
-                    ? 'Bets open 3h before kickoff'
+                    ? 'Bets open 24h before kickoff'
                     : oddsMissing
                       ? 'Loading odds…'
                       : pickImpossible

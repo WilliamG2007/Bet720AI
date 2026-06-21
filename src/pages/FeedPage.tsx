@@ -278,6 +278,13 @@ export default function FeedPage() {
                     </div>
                   </div>
 
+                  {/* Hot take */}
+                  {p.reasoning && (
+                    <p className="mt-2.5 text-[13px] text-text/85 italic leading-snug border-l-2 border-accent/30 pl-3">
+                      “{p.reasoning}”
+                    </p>
+                  )}
+
                   {/* Reactions */}
                   <div className="mt-3 flex items-center gap-1 flex-wrap">
                     {EMOJIS.map(emoji => {
