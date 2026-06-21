@@ -32,12 +32,31 @@ function toStandingEntry(e: FDStandingEntry): StandingEntry {
 
 async function syncCompetition(compId: number, dateFrom: string, dateTo: string): Promise<void> {
   // WC and cup competitions have no standings — skip standings fetch
-  const [matches, standings] = await Promise.all([
+  const [matches, standingsCurrent] = await Promise.all([
     fetchUpcomingMatches(compId, dateFrom, dateTo).catch(() => []),
     NO_STANDINGS.has(compId) ? Promise.resolve(null) : fetchStandings(compId).catch(() => null),
   ])
 
   if (!matches.length) return
+
+  // Early-season standings can have <5 games per team — Poisson rates from
+  // 1-2 games are pure noise. Fall back to the previous season's standings
+  // when the current table is too sparse, so we still avoid the
+  // DEFAULT_MATCH_ODDS (2.15/3.40/3.60) flatline for every fixture.
+  let standings = standingsCurrent
+  const tooSparse = standings && (() => {
+    const sample = [...standings.home, ...standings.away]
+    if (!sample.length) return true
+    const maxPlayed = Math.max(...sample.map(e => e.playedGames))
+    return maxPlayed < 5
+  })()
+  if (!standings || tooSparse) {
+    if (!NO_STANDINGS.has(compId)) {
+      const prevSeason = String(new Date().getUTCFullYear() - 1)
+      const prev = await fetchStandings(compId, prevSeason).catch(() => null)
+      if (prev) standings = prev
+    }
+  }
 
   // Build team strength map if standings available
   const standingsData = standings

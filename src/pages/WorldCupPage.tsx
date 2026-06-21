@@ -240,10 +240,16 @@ export default function WorldCupPage() {
 
   useEffect(() => {
     ;(async () => {
-      const { count } = await supabase
-        .from('matches').select('id', { count: 'exact', head: true })
+      const { data: head } = await supabase
+        .from('matches').select('id, home_odds')
         .eq('competition', 'FIFA World Cup')
-      if (!count) await handleSync()
+        .in('status', ['scheduled', 'live'])
+        .limit(20)
+      const rows = (head ?? []) as { id: string; home_odds: number | null }[]
+      // Sync if empty OR any pre-match row is missing nation-strength odds
+      // (avoids showing the 2.15/3.40/3.60 DEFAULT_MATCH_ODDS fallback).
+      const needsSync = rows.length === 0 || rows.some(r => r.home_odds == null)
+      if (needsSync) await handleSync()
       else await loadMatches()
       await loadPredictions()
       await syncLive()        // flip any in-play games to live on entry

@@ -31,8 +31,23 @@ export default function PredictPage() {
     const { data } = await supabase.from('matches').select('*')
       .in('status', ['scheduled', 'live'])
       .order('kickoff_at', { ascending: true }).limit(30)
-    setMatches((data ?? []) as Match[])
+    const rows = (data ?? []) as Match[]
+    setMatches(rows)
     setLoading(false)
+
+    // If no rows exist OR any pre-match row is missing odds, kick off a
+    // background sync so the user sees real Poisson/nation-strength odds
+    // instead of the DEFAULT_MATCH_ODDS fallback (the dreaded 2.15/3.60).
+    const needsResync = rows.length === 0 || rows.some(r => r.home_odds == null)
+    if (needsResync) {
+      void (async () => {
+        await syncUpcomingMatches()
+        const { data: fresh } = await supabase.from('matches').select('*')
+          .in('status', ['scheduled', 'live'])
+          .order('kickoff_at', { ascending: true }).limit(30)
+        setMatches((fresh ?? []) as Match[])
+      })()
+    }
   }
 
   async function loadPredictions() {
