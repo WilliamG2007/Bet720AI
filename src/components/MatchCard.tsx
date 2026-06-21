@@ -62,9 +62,6 @@ export function MatchCard({ match, onClick, selected }: Props) {
         </div>
       </div>
 
-      {match.matchday && (
-        <div className="mt-2.5 text-[10px] text-muted/40 font-mono">MD {match.matchday}</div>
-      )}
     </button>
   )
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
+import { format, isToday, isTomorrow, isThisWeek } from 'date-fns'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLeague } from '../contexts/LeagueContext'
@@ -8,6 +9,13 @@ import { MatchCard } from '../components/MatchCard'
 import { PredictionModal } from '../components/PredictionModal'
 import { RiskBadge } from '../components/RiskBadge'
 import { syncUpcomingMatches } from '../lib/matchSync'
+
+function dayLabel(d: Date): string {
+  if (isToday(d))    return 'Today'
+  if (isTomorrow(d)) return 'Tomorrow'
+  if (isThisWeek(d, { weekStartsOn: 1 })) return format(d, 'EEEE')      // "Wednesday"
+  return format(d, 'EEE d MMM')                                          // "Wed 24 Jun"
+}
 
 export default function PredictPage() {
   const { authUser } = useAuth()
@@ -43,11 +51,11 @@ export default function PredictPage() {
 
   useEffect(() => { loadMatches(); loadPredictions() }, [authUser, activeLeague])
 
+  // Group by calendar day. Insertion order = chronological because the
+  // matches array is already sorted by kickoff_at ascending.
   const matchDays = matches.reduce<Record<string, Match[]>>((acc, m) => {
-    const day = m.matchday
-      ? `Matchday ${m.matchday}`
-      : new Date(m.kickoff_at).toLocaleDateString('en-GB', { weekday: 'long', month: 'short', day: 'numeric' })
-    ;(acc[day] ??= []).push(m)
+    const key = dayLabel(new Date(m.kickoff_at))
+    ;(acc[key] ??= []).push(m)
     return acc
   }, {})
 
