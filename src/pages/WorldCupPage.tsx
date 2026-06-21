@@ -49,6 +49,64 @@ function kickoffLabel(d: string): string {
   return format(dt, 'EEE d MMM · HH:mm')
 }
 
+/**
+ * Urgency tier 0–5 based on time to kickoff. Drives the gradient
+ * highlight on upcoming match rows — the closer kickoff is, the louder
+ * the row looks. Live matches return tier 6 (handled separately as amber).
+ */
+function kickoffUrgency(ko: Date, now: number): { tier: 0 | 1 | 2 | 3 | 4 | 5; chip: string | null } {
+  const diffMs   = ko.getTime() - now
+  const diffMins = diffMs / 60_000
+  const diffHrs  = diffMins / 60
+
+  if (diffMs <= 0)        return { tier: 5, chip: 'Kicks off now' }
+  if (diffMins < 60) {
+    const m = Math.max(1, Math.round(diffMins))
+    return { tier: 5, chip: `Kicks off in ${m}m` }
+  }
+  if (diffHrs < 3) {
+    const h = Math.floor(diffHrs)
+    const m = Math.round((diffHrs - h) * 60)
+    return { tier: 4, chip: `In ${h}h ${m}m` }
+  }
+  if (diffHrs < 6) {
+    return { tier: 3, chip: `Today · ${format(ko, 'HH:mm')}` }
+  }
+  if (isToday(ko)) {
+    return { tier: 2, chip: `Today · ${format(ko, 'HH:mm')}` }
+  }
+  if (isTomorrow(ko)) {
+    return { tier: 1, chip: `Tomorrow · ${format(ko, 'HH:mm')}` }
+  }
+  return { tier: 0, chip: null }
+}
+
+/** Tailwind classes for each urgency tier — left border + bg tint. */
+const URGENCY_ROW: Record<0 | 1 | 2 | 3 | 4 | 5, string> = {
+  0: '',
+  1: 'border-l-2 border-accent/25',
+  2: 'border-l-2 border-accent/50',
+  3: 'border-l-2 border-accent/75',
+  4: 'border-l-4 border-accent',
+  5: 'border-l-4 border-accent',
+}
+const URGENCY_BG: Record<0 | 1 | 2 | 3 | 4 | 5, string> = {
+  0: '',
+  1: '',
+  2: 'bg-accent/[0.04]',
+  3: 'bg-accent/[0.08]',
+  4: 'bg-accent/[0.12]',
+  5: 'bg-accent/[0.18]',
+}
+const URGENCY_CHIP: Record<0 | 1 | 2 | 3 | 4 | 5, string> = {
+  0: '',
+  1: 'bg-accent/10 text-accent/80',
+  2: 'bg-accent/15 text-accent',
+  3: 'bg-accent/20 text-accent',
+  4: 'bg-accent/25 text-accent',
+  5: 'bg-accent text-bg',
+}
+
 export default function WorldCupPage() {
   const { authUser } = useAuth()
   const { activeLeague } = useLeague()
@@ -60,6 +118,7 @@ export default function WorldCupPage() {
   const [syncing, setSyncing]         = useState(false)
   const [tab, setTab]                 = useState<'upcoming' | 'live' | 'results'>('upcoming')
   const [upcomingSort, setUpcomingSort] = useState<'group' | 'date'>('group')
+  const [tickNow, setTickNow]         = useState(() => Date.now())
 
   async function loadMatches() {
     setLoading(true)
@@ -198,6 +257,12 @@ export default function WorldCupPage() {
     return () => clearInterval(iv)
   }, [])
 
+  // 60s ticker so the urgency countdown ("in 23m") actually counts down
+  useEffect(() => {
+    const iv = setInterval(() => setTickNow(Date.now()), 60_000)
+    return () => clearInterval(iv)
+  }, [])
+
   // Group upcoming by group/stage
   const liveMatches = matches.filter(m => m.status === 'live')
   const upcomingList = matches
@@ -267,7 +332,7 @@ export default function WorldCupPage() {
     }
   }
 
-  function MatchRow({ m: rawM, showDayBadge = false }: { m: Match; showDayBadge?: boolean }) {
+  function MatchRow({ m: rawM }: { m: Match }) {
     const m          = withComputedOdds(rawM)
     const preds      = predictions.filter(p => p.match_id === m.id)
     const isLive     = m.status === 'live'
@@ -276,25 +341,23 @@ export default function WorldCupPage() {
     const locked     = m.status === 'finished' || m.status === 'postponed'
     const minute     = isLive ? estimateLiveMinute(m.kickoff_at) : 0
     const ko         = new Date(m.kickoff_at)
-    const isToday_   = !isLive && !isFinished && isToday(ko)
-    const isTmrw_    = !isLive && !isFinished && isTomorrow(ko)
+    const urg        = (!isLive && !isFinished) ? kickoffUrgency(ko, tickNow) : { tier: 0 as const, chip: null }
+    const tier       = urg.tier
 
     return (
-      <div className={isToday_ ? 'border-l-2 border-accent' : isTmrw_ ? 'border-l-2 border-accent/40' : ''}>
+      <div className={isLive ? '' : URGENCY_ROW[tier]}>
         <button
           onClick={() => !locked && activeLeague && setSelected(m)}
           disabled={locked || !activeLeague}
           className={`w-full text-left px-4 py-3.5 transition-colors hover:bg-surface-2/50 ${
-            isLive ? 'bg-amber-500/5' : isToday_ ? 'bg-accent/5' : ''
+            isLive ? 'bg-amber-500/5' : URGENCY_BG[tier]
           } disabled:cursor-default`}
         >
-          {showDayBadge && (isToday_ || isTmrw_) && (
+          {urg.chip && (
             <div className="mb-2">
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                isToday_ ? 'bg-accent/20 text-accent' : 'bg-accent/10 text-accent/80'
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${isToday_ ? 'bg-accent animate-pulse' : 'bg-accent/60'}`} />
-                {isToday_ ? 'Today' : 'Tomorrow'} · {format(ko, 'HH:mm')}
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${URGENCY_CHIP[tier]}`}>
+                {tier >= 4 && <span className={`w-1.5 h-1.5 rounded-full ${tier === 5 ? 'bg-bg' : 'bg-accent'} animate-pulse`} />}
+                {urg.chip}
               </span>
             </div>
           )}
@@ -511,7 +574,7 @@ export default function WorldCupPage() {
                         Today
                       </p>
                       <div className="card divide-y divide-border overflow-hidden ring-1 ring-accent/30">
-                        {upcomingByDate.today.map(m => <MatchRow key={m.id} m={m} showDayBadge />)}
+                        {upcomingByDate.today.map(m => <MatchRow key={m.id} m={m} />)}
                       </div>
                     </div>
                   )}
@@ -519,7 +582,7 @@ export default function WorldCupPage() {
                     <div className="mb-5">
                       <p className="text-[10px] font-bold uppercase tracking-widest text-accent/70 mb-2">Tomorrow</p>
                       <div className="card divide-y divide-border overflow-hidden">
-                        {upcomingByDate.tomorrow.map(m => <MatchRow key={m.id} m={m} showDayBadge />)}
+                        {upcomingByDate.tomorrow.map(m => <MatchRow key={m.id} m={m} />)}
                       </div>
                     </div>
                   )}
