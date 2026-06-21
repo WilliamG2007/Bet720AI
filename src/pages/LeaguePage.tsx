@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Copy, Check, Users, Plus, LogIn, Crown, Trophy, Swords } from 'lucide-react'
+import { Copy, Check, Users, Plus, LogIn, Crown, Trophy, Swords, Share2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLeague } from '../contexts/LeagueContext'
@@ -117,6 +117,23 @@ export default function LeaguePage() {
     setCopied(true); setTimeout(() => setCopied(false), 2000)
   }
 
+  function buildInviteUrl(code: string): string {
+    return `${window.location.origin}/join/${code}`
+  }
+
+  async function shareInvite() {
+    if (!activeLeague) return
+    const url  = buildInviteUrl(activeLeague.invite_code)
+    const text = `Join my Bet720 league "${activeLeague.name}" — tap to hop in:`
+    // Native share sheet on mobile, copy-link fallback elsewhere.
+    if (typeof navigator.share === 'function') {
+      try { await navigator.share({ title: 'Bet720', text, url }); return }
+      catch { /* user cancelled — fall through to copy */ }
+    }
+    await navigator.clipboard.writeText(url)
+    setCopied(true); setTimeout(() => setCopied(false), 2000)
+  }
+
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
     if (!authUser) return
@@ -226,15 +243,23 @@ export default function LeaguePage() {
                   <p className="text-xs text-muted mt-1">{activeLeague.season} · {activeLeague.sport}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="label">Invite Code</p>
-                  <button onClick={copyCode}
-                    className="flex items-center gap-2 bg-surface-2 border border-border rounded-xl px-3.5 py-2 hover:border-white/15 transition-colors">
-                    <span className="font-mono font-bold tracking-widest text-sm text-text">{activeLeague.invite_code}</span>
-                    {copied
-                      ? <Check size={13} className="text-accent" />
-                      : <Copy size={13} className="text-muted" />
-                    }
-                  </button>
+                  <p className="label">Invite</p>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={copyCode}
+                      title="Copy invite code"
+                      className="flex items-center gap-2 bg-surface-2 border border-border rounded-xl px-3.5 py-2 hover:border-white/15 transition-colors">
+                      <span className="font-mono font-bold tracking-widest text-sm text-text">{activeLeague.invite_code}</span>
+                      {copied
+                        ? <Check size={13} className="text-accent" />
+                        : <Copy size={13} className="text-muted" />
+                      }
+                    </button>
+                    <button onClick={shareInvite}
+                      title="Share invite link"
+                      className="bg-accent/10 border border-accent/30 rounded-xl p-2 hover:bg-accent/15 transition-colors">
+                      <Share2 size={14} className="text-accent" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

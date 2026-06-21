@@ -1,10 +1,15 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function AuthPage() {
   const { signIn, signUp } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  // After a successful sign-in, jump back to the URL the user originally
+  // requested (set by ProtectedRoute), or fall back to home. This is what
+  // makes shareable /join/<code> links actually round-trip.
+  const returnTo = (location.state as { from?: string } | null)?.from ?? '/'
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -20,7 +25,7 @@ export default function AuthPage() {
     if (mode === 'login') {
       const { error } = await signIn(email, password)
       if (error) setError(error.message)
-      else navigate('/')
+      else navigate(returnTo, { replace: true })
     } else {
       if (username.length < 3) { setError('Username must be at least 3 characters'); setLoading(false); return }
       const { error } = await signUp(email, password, username)
