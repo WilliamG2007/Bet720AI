@@ -3,6 +3,10 @@
  * any predictions for matches that have finished. Runs even when nobody
  * is on the site, so points settle within minutes of the final whistle.
  *
+ * Also delegates to /api/sync/matches every tick to refresh ODDS on
+ * upcoming fixtures so newly-added scheduled matches never sit at
+ * NULL odds waiting for a user page-load to price them.
+ *
  * Required env vars (configure in Vercel project settings):
  *   FOOTBALL_API_KEY       — football-data.org token
  *   SUPABASE_URL           — your Supabase project URL
@@ -133,7 +137,19 @@ export default async function handler(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ error: 'missing env vars' }), { status: 500 })
   }
 
-  const stats = { liveUpserted: 0, finishedUpserted: 0, resolved: 0, forced: 0, remindersSent: 0, errors: [] as string[] }
+  const stats = { liveUpserted: 0, finishedUpserted: 0, resolved: 0, forced: 0, remindersSent: 0, upcomingSynced: false, errors: [] as string[] }
+
+  // 0) Refresh upcoming scheduled matches + odds via the public sync endpoint.
+  // Same Vercel deployment, so the round-trip is effectively in-process.
+  // Done first so the live/finished pass below sees any newly-listed fixtures.
+  try {
+    const origin = new URL(req.url).origin
+    const r = await fetch(`${origin}/api/sync/matches`, { method: 'POST' })
+    if (r.ok) stats.upcomingSynced = true
+    else stats.errors.push(`upcoming sync ${r.status}: ${(await r.text()).slice(0, 200)}`)
+  } catch (e) {
+    stats.errors.push(`upcoming sync: ${(e as Error).message}`)
+  }
 
   try {
     // 1) Upsert currently in-play WC matches
