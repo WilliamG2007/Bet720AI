@@ -41,6 +41,11 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState('')
 
+  // Real odds haven't landed yet (NULL in DB) — display defaults but DON'T
+  // let the user lock in a bet against them, otherwise heavy favourites
+  // would pay out at the neutral 2.15/3.60 fallback.
+  const oddsMissing = match.home_odds == null || match.away_odds == null
+
   // Use match odds if available, fall back to neutral defaults
   const baseOdds = {
     home:     match.home_odds     ?? DEFAULT_MATCH_ODDS.home,
@@ -99,7 +104,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
     if (bttsNoImpossible && bttsPick === 'no') setBttsPick('yes')
   }, [bttsNoImpossible, bttsPick])
 
-  const formDisabled = isLocked || alreadyPlaced
+  const formDisabled = isLocked || alreadyPlaced || oddsMissing
 
   function getValue() {
     if (predType === 'result') return resultPick
@@ -185,6 +190,16 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
               <p className="text-[11px] text-muted mt-0.5">
                 {existing.points_wagered} pts wagered · bets are final. Pick a different prediction type to add another.
               </p>
+            </div>
+          )}
+
+          {oddsMissing && !isLocked && (
+            <div className="bg-amber-500/8 border border-amber-500/25 rounded-xl px-4 py-3 flex items-center gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+              <div>
+                <p className="text-amber-400 text-sm font-semibold">Loading odds…</p>
+                <p className="text-[11px] text-muted mt-0.5">Fetching real odds for this match. Hold tight — bets will open as soon as they land.</p>
+              </div>
             </div>
           )}
 
@@ -378,9 +393,11 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
               </span>
             ) : alreadyPlaced
               ? 'Bet locked in'
-              : pickImpossible
-                ? 'Pick is impossible'
-                : 'Lock In'}
+              : oddsMissing
+                ? 'Loading odds…'
+                : pickImpossible
+                  ? 'Pick is impossible'
+                  : 'Lock In'}
           </button>
         </div>
       </div>
