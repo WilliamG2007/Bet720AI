@@ -112,20 +112,33 @@ export default function WorldCupPage() {
         if (error) { console.error('Live upsert failed:', error); return }
       }
 
-      // Reconcile stale-live: any match we still call 'live' that isn't in the
-      // in-play list anymore must have ended. Fetch each, update, resolve.
+      // Reconcile stale-live. Two cases:
+      //  (1) DB-live but no longer in the API's in-play list → it ended; fetch
+      //      individually and update.
+      //  (2) DB-live AND still in the in-play list BUT kicked off more than
+      //      ~3.5 hours ago → physically impossible (90 + HT + stoppage + ET +
+      //      pens fits well under that). The free-tier API is stuck reporting
+      //      IN_PLAY; force-flip to finished using the last known score.
+      const MAX_LIVE_MS = 3.5 * 60 * 60 * 1000
+      const now = Date.now()
       const liveIds = new Set(live.map(m => m.id))
       const { data: stale } = await supabase
         .from('matches')
-        .select('id, external_id')
+        .select('id, external_id, kickoff_at')
         .eq('competition', 'FIFA World Cup')
         .eq('status', 'live')
-      const staleRows = (stale ?? []) as { id: string; external_id: number }[]
+      const staleRows = (stale ?? []) as { id: string; external_id: number; kickoff_at: string }[]
       for (const m of staleRows) {
-        if (liveIds.has(m.external_id)) continue
+        const ageMs = now - new Date(m.kickoff_at).getTime()
+        const stuckTooLong = ageMs > MAX_LIVE_MS
+        const apiSaysOver  = !liveIds.has(m.external_id)
+        if (!stuckTooLong && !apiSaysOver) continue
         try {
           const fresh = await fetchMatch(m.external_id)
           const row = fdMatchToDbMatch(fresh) as Record<string, unknown>
+          // If we've passed the physical ceiling, trust our own clock over the
+          // stuck upstream status — force the match to finished.
+          if (stuckTooLong) row.status = 'finished'
           await supabase.from('matches').upsert(row, { onConflict: 'external_id' })
           if (row.status === 'finished') {
             await supabase.rpc('resolve_predictions', { p_match_id: m.id })
