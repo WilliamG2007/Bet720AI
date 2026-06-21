@@ -100,6 +100,20 @@ async function sbResolve(sbUrl: string, key: string, matchId: string) {
   if (!res.ok) throw new Error(`supabase rpc ${res.status}: ${await res.text()}`)
 }
 
+async function sbCallRpc(sbUrl: string, key: string, fn: string): Promise<unknown> {
+  const res = await fetch(`${sbUrl}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  })
+  if (!res.ok) throw new Error(`supabase rpc ${fn} ${res.status}: ${await res.text()}`)
+  return res.json().catch(() => null)
+}
+
 export default async function handler(req: Request): Promise<Response> {
   const apiKey = process.env.FOOTBALL_API_KEY ?? ''
   const sbUrl  = process.env.SUPABASE_URL ?? ''
@@ -119,7 +133,7 @@ export default async function handler(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ error: 'missing env vars' }), { status: 500 })
   }
 
-  const stats = { liveUpserted: 0, finishedUpserted: 0, resolved: 0, forced: 0, errors: [] as string[] }
+  const stats = { liveUpserted: 0, finishedUpserted: 0, resolved: 0, forced: 0, remindersSent: 0, errors: [] as string[] }
 
   try {
     // 1) Upsert currently in-play WC matches
@@ -174,6 +188,13 @@ export default async function handler(req: Request): Promise<Response> {
           stats.errors.push(`resolve ${r.id}: ${(e as Error).message}`)
         }
       }
+    }
+    // 4) Fire kickoff reminders for predictions on matches starting in 10-20 min
+    try {
+      const sent = await sbCallRpc(sbUrl, sbKey, 'send_kickoff_reminders')
+      if (typeof sent === 'number') stats.remindersSent = sent
+    } catch (e) {
+      stats.errors.push(`reminders: ${(e as Error).message}`)
     }
   } catch (e) {
     stats.errors.push((e as Error).message)

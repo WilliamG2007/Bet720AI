@@ -241,13 +241,16 @@ export default function FeedPage() {
                       </div>
 
                       {/* Match */}
-                      <div className="flex items-center gap-1.5 mt-1.5">
+                      <Link
+                        to={`/match/${match.id}`}
+                        className="flex items-center gap-1.5 mt-1.5 hover:text-text transition-colors group"
+                      >
                         <TeamCrest src={match.home_crest} name={match.home_team} size={14} />
-                        <span className="text-xs text-muted">{match.home_team}</span>
+                        <span className="text-xs text-muted group-hover:text-text">{match.home_team}</span>
                         <span className="text-muted/30 text-xs">×</span>
-                        <span className="text-xs text-muted">{match.away_team}</span>
+                        <span className="text-xs text-muted group-hover:text-text">{match.away_team}</span>
                         <TeamCrest src={match.away_crest} name={match.away_team} size={14} />
-                      </div>
+                      </Link>
                     </div>
                   </div>
 

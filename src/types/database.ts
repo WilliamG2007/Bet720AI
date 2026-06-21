@@ -206,7 +206,7 @@ export interface Database {
         Row: {
           id: string
           user_id: string
-          type: 'bet_settled' | 'rival_bet' | 'league_join'
+          type: 'bet_settled' | 'rival_bet' | 'league_join' | 'bet_starting' | 'achievement_earned'
           payload: Json
           read_at: string | null
           created_at: string
@@ -214,7 +214,7 @@ export interface Database {
         Insert: {
           id?: string
           user_id: string
-          type: 'bet_settled' | 'rival_bet' | 'league_join'
+          type: 'bet_settled' | 'rival_bet' | 'league_join' | 'bet_starting' | 'achievement_earned'
           payload?: Json
           read_at?: string | null
           created_at?: string
@@ -222,10 +222,53 @@ export interface Database {
         Update: {
           id?: string
           user_id?: string
-          type?: 'bet_settled' | 'rival_bet' | 'league_join'
+          type?: 'bet_settled' | 'rival_bet' | 'league_join' | 'bet_starting' | 'achievement_earned'
           payload?: Json
           read_at?: string | null
           created_at?: string
+        }
+      }
+      achievements: {
+        Row: {
+          id: string
+          title: string
+          description: string
+          icon: string
+          tier: 'bronze' | 'silver' | 'gold' | 'platinum'
+          sort_order: number
+        }
+        Insert: {
+          id: string
+          title: string
+          description: string
+          icon: string
+          tier: 'bronze' | 'silver' | 'gold' | 'platinum'
+          sort_order?: number
+        }
+        Update: {
+          id?: string
+          title?: string
+          description?: string
+          icon?: string
+          tier?: 'bronze' | 'silver' | 'gold' | 'platinum'
+          sort_order?: number
+        }
+      }
+      user_achievements: {
+        Row: {
+          user_id: string
+          achievement_id: string
+          earned_at: string
+        }
+        Insert: {
+          user_id: string
+          achievement_id: string
+          earned_at?: string
+        }
+        Update: {
+          user_id?: string
+          achievement_id?: string
+          earned_at?: string
         }
       }
       feed_reactions: {
@@ -264,6 +307,8 @@ export type Prediction = Database['public']['Tables']['predictions']['Row']
 export type FeedReaction = Database['public']['Tables']['feed_reactions']['Row']
 export type Notification = Database['public']['Tables']['notifications']['Row']
 export type NotificationType = Notification['type']
+export type Achievement = Database['public']['Tables']['achievements']['Row']
+export type UserAchievement = Database['public']['Tables']['user_achievements']['Row']
 
 export type PredictionType = 'result' | 'exact_score' | 'btts'
 export type RiskTier = 'low' | 'medium' | 'high'

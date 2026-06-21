@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { Copy, Check, Users, Plus, LogIn, Crown, Trophy } from 'lucide-react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { Copy, Check, Users, Plus, LogIn, Crown, Trophy, Swords } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLeague } from '../contexts/LeagueContext'
@@ -25,7 +25,8 @@ export default function LeaguePage() {
   const { activeLeague, leagues, setActiveLeague, reload } = useLeague()
   const [members, setMembers] = useState<MemberWithUser[]>([])
   const [standings, setStandings] = useState<Standing[]>([])
-  const [view, setView] = useState<'members' | 'leaderboard'>('members')
+  const [allPreds, setAllPreds] = useState<Prediction[]>([])
+  const [view, setView] = useState<'members' | 'leaderboard' | 'rivals'>('members')
   const [copied, setCopied] = useState(false)
   const [tab, setTab] = useState<'overview' | 'create' | 'join'>('overview')
   const [createName, setCreateName] = useState('')
@@ -52,6 +53,7 @@ export default function LeaguePage() {
       const { data: predsRaw } = await supabase.from('predictions').select('*')
         .eq('league_id', activeLeague.id).eq('resolved', true).in('user_id', userIds)
       const preds = (predsRaw ?? []) as Prediction[]
+      setAllPreds(preds)
       setStandings(data.map(m => {
         const up = preds.filter(p => p.user_id === m.user_id)
         const wins = up.filter(p => (p.points_won ?? 0) > 0).length
@@ -69,6 +71,45 @@ export default function LeaguePage() {
       }).filter(s => s.user))
     })()
   }, [activeLeague])
+
+  // ── Rivalries: head-to-head record on matches we both bet on ─────────
+  // Per match, whoever scored more points wins that round. Ties when
+  // both scored the same. Aggregated over every resolved shared match.
+  const rivals = useMemo(() => {
+    if (!authUser) return [] as { user: User; wins: number; losses: number; ties: number; shared: number; pointsGap: number }[]
+    const myPreds = allPreds.filter(p => p.user_id === authUser.id)
+    const myByMatch = new Map(myPreds.map(p => [p.match_id, p]))
+    const me = standings.find(s => s.user?.id === authUser.id)
+    const myPts = me?.member.total_points ?? 0
+
+    return standings
+      .filter(s => s.user?.id !== authUser.id)
+      .map(s => {
+        const theirPreds = allPreds.filter(p => p.user_id === s.user.id)
+        let wins = 0, losses = 0, ties = 0, shared = 0
+        for (const tp of theirPreds) {
+          const mp = myByMatch.get(tp.match_id)
+          if (!mp) continue
+          shared++
+          const mine = mp.points_won ?? 0
+          const theirs = tp.points_won ?? 0
+          if      (mine > theirs) wins++
+          else if (mine < theirs) losses++
+          else                    ties++
+        }
+        return {
+          user: s.user,
+          wins, losses, ties, shared,
+          pointsGap: s.member.total_points - myPts,
+        }
+      })
+      .sort((a, b) => {
+        // Order: most shared games first, then closest gap, then by wins
+        if (b.shared !== a.shared) return b.shared - a.shared
+        if (Math.abs(a.pointsGap) !== Math.abs(b.pointsGap)) return Math.abs(a.pointsGap) - Math.abs(b.pointsGap)
+        return b.wins - a.wins
+      })
+  }, [authUser, allPreds, standings])
 
   async function copyCode() {
     if (!activeLeague) return
@@ -198,20 +239,108 @@ export default function LeaguePage() {
               </div>
             </div>
 
-            {/* View toggle: Members / Leaderboard */}
+            {/* View toggle: Members / Leaderboard / Rivals */}
             <div className="flex gap-1 mb-3 bg-surface-2 rounded-xl p-1">
-              {(['members', 'leaderboard'] as const).map(v => (
+              {(['members', 'leaderboard', 'rivals'] as const).map(v => (
                 <button key={v} onClick={() => setView(v)}
                   className={`flex-1 py-2 rounded-lg text-xs font-semibold capitalize transition-all flex items-center justify-center gap-1.5 ${
                     view === v ? 'bg-surface text-text shadow-sm' : 'text-muted hover:text-text'
                   }`}>
-                  {v === 'members' ? <Users size={12} /> : <Trophy size={12} />}
+                  {v === 'members'     ? <Users size={12} /> :
+                   v === 'leaderboard' ? <Trophy size={12} /> :
+                                          <Swords size={12} />}
                   {v}
                 </button>
               ))}
             </div>
 
-            {view === 'members' ? (
+            {view === 'rivals' ? (
+              rivals.length === 0 ? (
+                <div className="text-center py-12 card">
+                  <Swords size={28} className="text-muted/30 mx-auto mb-3" />
+                  <p className="text-sm font-semibold text-text">No rivals yet</p>
+                  <p className="text-xs text-muted mt-1">Bet on the same matches as others to build a record.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Highlight: top rival = most shared bets */}
+                  {rivals[0] && rivals[0].shared > 0 && (
+                    <div className="card p-4 border-accent/20 bg-accent/[0.04]">
+                      <p className="text-[10px] font-semibold text-accent uppercase tracking-wider mb-2">Your Top Rival</p>
+                      <div className="flex items-center gap-3">
+                        <Avatar url={rivals[0].user.avatar_url} username={rivals[0].user.username} size={40} />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-sm text-text truncate">{rivals[0].user.username}</p>
+                          <p className="text-[11px] text-muted mt-0.5">
+                            {rivals[0].shared} shared {rivals[0].shared === 1 ? 'match' : 'matches'} ·
+                            {' '}{rivals[0].pointsGap > 0
+                              ? <span className="text-danger">{rivals[0].pointsGap} pts ahead</span>
+                              : rivals[0].pointsGap < 0
+                                ? <span className="text-accent">{Math.abs(rivals[0].pointsGap)} pts behind</span>
+                                : <span>tied with you</span>}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-mono text-base font-bold text-text">
+                            <span className="text-accent">{rivals[0].wins}</span>
+                            <span className="text-muted/50">-</span>
+                            <span className="text-danger">{rivals[0].losses}</span>
+                            {rivals[0].ties > 0 && (
+                              <>
+                                <span className="text-muted/50">-</span>
+                                <span className="text-muted">{rivals[0].ties}</span>
+                              </>
+                            )}
+                          </p>
+                          <p className="text-[9px] font-mono text-muted/50 uppercase">W-L{rivals[0].ties > 0 ? '-T' : ''}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="card overflow-hidden">
+                    <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Swords size={13} className="text-muted" />
+                        <span className="text-xs font-semibold text-muted">Head-to-Head</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-muted/60">vs you</span>
+                    </div>
+                    <div className="divide-y divide-border">
+                      {rivals.map(r => (
+                        <div key={r.user.id} className="flex items-center gap-3 px-4 py-3">
+                          <Avatar url={r.user.avatar_url} username={r.user.username} size={32} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-text truncate">{r.user.username}</p>
+                            <p className="text-[10px] font-mono text-muted/60 mt-0.5">
+                              {r.shared > 0
+                                ? `${r.shared} shared bet${r.shared === 1 ? '' : 's'}`
+                                : 'no shared bets yet'}
+                              {r.pointsGap !== 0 && (
+                                <> · {r.pointsGap > 0 ? '+' : ''}{r.pointsGap} pts</>
+                              )}
+                            </p>
+                          </div>
+                          {r.shared > 0 && (
+                            <span className="font-mono text-sm font-bold flex-shrink-0">
+                              <span className="text-accent">{r.wins}</span>
+                              <span className="text-muted/40">-</span>
+                              <span className="text-danger">{r.losses}</span>
+                              {r.ties > 0 && (
+                                <>
+                                  <span className="text-muted/40">-</span>
+                                  <span className="text-muted">{r.ties}</span>
+                                </>
+                              )}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )
+            ) : view === 'members' ? (
               <div className="card overflow-hidden">
                 <div className="px-4 py-3 border-b border-border flex items-center gap-2">
                   <Users size={13} className="text-muted" />

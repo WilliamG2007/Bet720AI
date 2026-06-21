@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { LogOut } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -7,6 +8,7 @@ import type { Prediction, Match } from '../types/database'
 import { RiskBadge } from '../components/RiskBadge'
 import { Avatar } from '../components/Avatar'
 import { TeamCrest } from '../components/TeamCrest'
+import { AchievementsPanel } from '../components/AchievementsPanel'
 import { format, isPast } from 'date-fns'
 
 interface PredWithMatch { pred: Prediction; match: Match }
@@ -103,7 +105,10 @@ export default function BetsPage() {
     const mult  = p.odds_multiplier ?? 1
 
     return (
-      <div className={`card p-4 space-y-3 ${won ? 'border-accent/20' : lost ? 'border-danger/20' : isLive ? 'border-amber-500/30' : ''}`}>
+      <Link
+        to={`/match/${m.id}`}
+        className={`block card p-4 space-y-3 hover:border-white/15 transition-colors ${won ? 'border-accent/20' : lost ? 'border-danger/20' : isLive ? 'border-amber-500/30' : ''}`}
+      >
         {/* Match row */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
@@ -175,7 +180,7 @@ export default function BetsPage() {
             )}
           </div>
         </div>
-      </div>
+      </Link>
     )
   }
 
@@ -334,6 +339,9 @@ export default function BetsPage() {
                 </div>
               ))}
             </div>
+
+            {/* Achievements */}
+            {authUser && <AchievementsPanel userId={authUser.id} />}
 
             {/* Accuracy by type */}
             <div className="card overflow-hidden">

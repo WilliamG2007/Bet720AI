@@ -134,9 +134,11 @@ function NotifRow({ n }: { n: Notification }) {
 }
 
 function iconFor(type: NotificationType, p: Record<string, unknown>): string {
-  if (type === 'bet_settled')  return p.won ? '🎯' : '💔'
-  if (type === 'rival_bet')    return '⚔️'
-  if (type === 'league_join')  return '👋'
+  if (type === 'bet_settled')        return p.won ? '🎯' : '💔'
+  if (type === 'rival_bet')          return '⚔️'
+  if (type === 'league_join')        return '👋'
+  if (type === 'bet_starting')       return '⏱️'
+  if (type === 'achievement_earned') return (p.icon as string) ?? '🏅'
   return '🔔'
 }
 
@@ -147,6 +149,8 @@ function titleFor(type: NotificationType, p: Record<string, unknown>): string {
   }
   if (type === 'rival_bet') return `${p.actor_name ?? 'Someone'} placed a bet`
   if (type === 'league_join') return `${p.joiner_name ?? 'Someone'} joined ${p.league_name ?? 'your league'}`
+  if (type === 'bet_starting') return `Your bet kicks off soon`
+  if (type === 'achievement_earned') return `Achievement: ${p.title ?? 'unlocked'}`
   return ''
 }
 
@@ -157,6 +161,12 @@ function subtitleFor(type: NotificationType, p: Record<string, unknown>): string
   }
   if (type === 'rival_bet' && match) {
     return `${match} · ${p.points ?? 0} pts on ${p.predicted ?? ''}`
+  }
+  if (type === 'bet_starting' && match) {
+    return `${match} · ${p.points ?? 0} pts on ${p.predicted ?? ''}`
+  }
+  if (type === 'achievement_earned' && p.description) {
+    return p.description as string
   }
   return null
 }

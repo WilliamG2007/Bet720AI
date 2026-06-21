@@ -9,6 +9,7 @@ import PredictPage from './pages/PredictPage'
 import LeaguePage from './pages/LeaguePage'
 import BetsPage from './pages/BetsPage'
 import WorldCupPage from './pages/WorldCupPage'
+import MatchDetailPage from './pages/MatchDetailPage'
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
                 <Route path="predict" element={<PredictPage />} />
                 <Route path="league" element={<LeaguePage />} />
                 <Route path="bets" element={<BetsPage />} />
+                <Route path="match/:matchId" element={<MatchDetailPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
