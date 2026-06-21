@@ -97,10 +97,10 @@ export async function fetchInPlayMatches(competitionId: number): Promise<FDMatch
   return matches
 }
 
-/** Fetch matches finished today (for resolving predictions) */
-export async function fetchRecentlyFinished(competitionId: number, dateFrom: string): Promise<FDMatch[]> {
+/** Fetch matches finished within a date window (for resolving predictions) */
+export async function fetchRecentlyFinished(competitionId: number, dateFrom: string, dateTo: string): Promise<FDMatch[]> {
   const { matches } = await apiFetch<FDMatchesResponse>(
-    `/competitions/${competitionId}/matches?status=FINISHED&dateFrom=${dateFrom}&dateTo=${dateFrom}`
+    `/competitions/${competitionId}/matches?status=FINISHED&dateFrom=${dateFrom}&dateTo=${dateTo}`
   )
   return matches
 }

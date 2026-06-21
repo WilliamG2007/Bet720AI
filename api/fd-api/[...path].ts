@@ -26,12 +26,20 @@ export default async function handler(req: Request): Promise<Response> {
     headers: { 'X-Auth-Token': apiKey },
   })
 
+  // Live in-play endpoints need fresh data — score/status changes are
+  // worthless if they're 60s stale. Cache them only briefly to soak up
+  // concurrent identical polls without serving outdated odds.
+  const isLive = url.search.includes('status=IN_PLAY') || url.search.includes('status=LIVE')
+  const cacheControl = isLive
+    ? 's-maxage=8, stale-while-revalidate=15'
+    : 's-maxage=60, stale-while-revalidate=120'
+
   const body = await res.text()
   return new Response(body, {
     status: res.status,
     headers: {
       'Content-Type': 'application/json',
-      'Cache-Control': 's-maxage=60, stale-while-revalidate=120',
+      'Cache-Control': cacheControl,
     },
   })
 }

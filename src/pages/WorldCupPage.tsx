@@ -7,10 +7,10 @@ import type { Match, Prediction } from '../types/database'
 import { PredictionModal } from '../components/PredictionModal'
 import { TeamCrest } from '../components/TeamCrest'
 import { RiskBadge } from '../components/RiskBadge'
-import { fetchUpcomingMatches, fetchInPlayMatches, fetchRecentlyFinished, fdMatchToDbMatch, COMPETITIONS } from '../lib/footballApi'
+import { fetchUpcomingMatches, fetchInPlayMatches, fetchRecentlyFinished, fetchMatch, fdMatchToDbMatch, COMPETITIONS } from '../lib/footballApi'
 import { estimateLiveMinute, computeLiveOdds, DEFAULT_MATCH_ODDS } from '../lib/poissonOdds'
 import { computeWcOdds } from '../lib/wcStrength'
-import { format, isPast, isToday, isTomorrow } from 'date-fns'
+import { format, isPast, isToday, isTomorrow, subDays } from 'date-fns'
 
 const GROUP_ORDER = [
   'GROUP_A','GROUP_B','GROUP_C','GROUP_D',
@@ -96,26 +96,60 @@ export default function WorldCupPage() {
     setSyncing(false)
   }
 
-  /** Fast: flip in-play matches to live + refresh their scores. */
+  /**
+   * Refresh in-play matches AND reconcile any DB rows still marked 'live' that
+   * the API no longer reports as in-play (they've ended) — fetch each
+   * individually and flip them, resolving predictions when finished.
+   */
   async function syncLive() {
     try {
       const live = await fetchInPlayMatches(COMPETITIONS.WC.id)
+
+      // Upsert currently in-play matches
       if (live.length) {
         const rows = live.map(m => withWcOdds(fdMatchToDbMatch(m)))
         const { error } = await supabase.from('matches').upsert(rows, { onConflict: 'external_id' })
         if (error) { console.error('Live upsert failed:', error); return }
+      }
+
+      // Reconcile stale-live: any match we still call 'live' that isn't in the
+      // in-play list anymore must have ended. Fetch each, update, resolve.
+      const liveIds = new Set(live.map(m => m.id))
+      const { data: stale } = await supabase
+        .from('matches')
+        .select('id, external_id')
+        .eq('competition', 'FIFA World Cup')
+        .eq('status', 'live')
+      const staleRows = (stale ?? []) as { id: string; external_id: number }[]
+      for (const m of staleRows) {
+        if (liveIds.has(m.external_id)) continue
+        try {
+          const fresh = await fetchMatch(m.external_id)
+          const row = fdMatchToDbMatch(fresh) as Record<string, unknown>
+          await supabase.from('matches').upsert(row, { onConflict: 'external_id' })
+          if (row.status === 'finished') {
+            await supabase.rpc('resolve_predictions', { p_match_id: m.id })
+          }
+        } catch (e) {
+          console.error(`Stale-live reconcile failed for ${m.external_id}:`, e)
+        }
+      }
+
+      if (live.length || staleRows.length) {
         await loadMatches()
+        await loadPredictions()
       }
     } catch (e) {
       console.error('WC live sync error:', e)
     }
   }
 
-  /** Slower: resolve predictions for matches finished today. */
+  /** Resolve predictions for matches finished since yesterday. */
   async function resolveFinished() {
     try {
-      const today    = format(new Date(), 'yyyy-MM-dd')
-      const finished = await fetchRecentlyFinished(COMPETITIONS.WC.id, today)
+      const today     = format(new Date(), 'yyyy-MM-dd')
+      const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd')
+      const finished  = await fetchRecentlyFinished(COMPETITIONS.WC.id, yesterday, today)
       if (!finished.length) return
       const rows = finished.map(fdMatchToDbMatch) as Record<string, unknown>[]
       await supabase.from('matches').upsert(rows, { onConflict: 'external_id' })
@@ -146,7 +180,7 @@ export default function WorldCupPage() {
 
   // Poll live matches every 30s while on the WC page
   useEffect(() => {
-    const iv = setInterval(syncLive, 30_000)
+    const iv = setInterval(syncLive, 15_000)
     return () => clearInterval(iv)
   }, [])
 
