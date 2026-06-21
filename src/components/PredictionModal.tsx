@@ -27,11 +27,15 @@ function fmtOdds(d: number): string {
 
 export function PredictionModal({ match, leagueId, existingPredictions, hasUsedDoubleOrNothing, onClose, onSuccess }: Props) {
   const { authUser } = useAuth()
+  // Live current score — drives "impossible pick" gating below
+  const curHomeLive = match.status === 'live' ? (match.home_score ?? 0) : 0
+  const curAwayLive = match.status === 'live' ? (match.away_score ?? 0) : 0
   const [predType, setPredType]     = useState<PredictionType>('result')
   const [resultPick, setResultPick] = useState<'1' | 'X' | '2'>('1')
   const [bttsPick, setBttsPick]     = useState<'yes' | 'no'>('yes')
-  const [homeScore, setHomeScore]   = useState('1')
-  const [awayScore, setAwayScore]   = useState('0')
+  // Default exact-score to the current score so live picks aren't auto-impossible
+  const [homeScore, setHomeScore]   = useState(() => String(curHomeLive || 1))
+  const [awayScore, setAwayScore]   = useState(() => String(curAwayLive))
   const [points, setPoints]         = useState(25)
   const [dbl, setDbl]               = useState(false)
   const [loading, setLoading]       = useState(false)
@@ -76,6 +80,26 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   const isLive     = match.status === 'live'
   const isLocked   = match.status === 'finished' || match.status === 'postponed'
   const existing   = existingPredictions.find(p => p.prediction_type === predType)
+  // Bets are one-shot: once placed, that prediction type is read-only.
+  const alreadyPlaced = !!existing
+
+  // Impossible-pick gating for live matches.
+  //  - BTTS "No"   → impossible once both teams have scored.
+  //  - Exact score → can't pick a score lower than what's already on the board.
+  const bttsNoImpossible = isLive && curHomeLive > 0 && curAwayLive > 0
+  const exactImpossible  = predType === 'exact_score' && (
+    (parseInt(homeScore) || 0) < curHomeLive ||
+    (parseInt(awayScore) || 0) < curAwayLive
+  )
+  const pickImpossible = exactImpossible ||
+    (predType === 'btts' && bttsPick === 'no' && bttsNoImpossible)
+
+  // Snap BTTS pick away from "No" if it just became impossible
+  useEffect(() => {
+    if (bttsNoImpossible && bttsPick === 'no') setBttsPick('yes')
+  }, [bttsNoImpossible, bttsPick])
+
+  const formDisabled = isLocked || alreadyPlaced
 
   function getValue() {
     if (predType === 'result') return resultPick
@@ -98,7 +122,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   }, [predType])
 
   async function handleSubmit() {
-    if (!authUser || isLocked) return
+    if (!authUser || formDisabled || pickImpossible) return
     setError(''); setLoading(true)
 
     const row: Record<string, unknown> = {
@@ -114,9 +138,8 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
       odds_multiplier:    netMult,   // store net-profit mult (decimal - 1)
     }
 
-    const { error: err } = existing
-      ? await supabase.from('predictions').update(row).eq('id', existing.id as string)
-      : await supabase.from('predictions').insert(row)
+    // Insert only — bets are final, no updates allowed.
+    const { error: err } = await supabase.from('predictions').insert(row)
 
     if (err) setError(err.message)
     else onSuccess()
@@ -156,6 +179,15 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
             </div>
           )}
 
+          {alreadyPlaced && !isLocked && (
+            <div className="bg-accent/8 border border-accent/25 rounded-xl px-4 py-3">
+              <p className="text-accent text-sm font-semibold">Bet locked in · {existing.predicted_value}</p>
+              <p className="text-[11px] text-muted mt-0.5">
+                {existing.points_wagered} pts wagered · bets are final. Pick a different prediction type to add another.
+              </p>
+            </div>
+          )}
+
           {isLive && !isLocked && (
             <div className="bg-amber-500/8 border border-amber-500/25 rounded-xl px-4 py-3 flex items-center gap-2.5">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
@@ -174,18 +206,24 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
                 { type: 'result'      as PredictionType, label: 'Match Result',     sub: '1 / X / 2', oddsRange: `${fmtOdds(Math.min(baseOdds.home, baseOdds.away))} – ${fmtOdds(Math.max(baseOdds.home, baseOdds.away))}` },
                 { type: 'btts'        as PredictionType, label: 'Both Teams Score', sub: 'Yes / No',   oddsRange: `${fmtOdds(Math.min(baseOdds.bttsYes, baseOdds.bttsNo))} – ${fmtOdds(Math.max(baseOdds.bttsYes, baseOdds.bttsNo))}` },
                 { type: 'exact_score' as PredictionType, label: 'Exact Score',      sub: 'e.g. 2 – 1', oddsRange: 'varies' },
-              ]).map(t => (
-                <button key={t.type} onClick={() => setPredType(t.type)} disabled={isLocked}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all duration-100 ${
-                    predType === t.type ? 'border-accent/40 bg-accent/5' : 'border-border hover:border-white/10'
-                  }`}>
-                  <div className="text-left">
-                    <p className="text-sm font-semibold text-text">{t.label}</p>
-                    <p className="text-xs text-muted mt-0.5">{t.sub}</p>
-                  </div>
-                  <span className="text-xs font-mono text-muted/60 ml-3">{t.oddsRange}</span>
-                </button>
-              ))}
+              ]).map(t => {
+                const placedThisType = existingPredictions.some(p => p.prediction_type === t.type)
+                return (
+                  <button key={t.type} onClick={() => setPredType(t.type)} disabled={isLocked}
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all duration-100 ${
+                      predType === t.type ? 'border-accent/40 bg-accent/5' : 'border-border hover:border-white/10'
+                    }`}>
+                    <div className="text-left">
+                      <p className="text-sm font-semibold text-text flex items-center gap-2">
+                        {t.label}
+                        {placedThisType && <span className="text-[9px] font-bold uppercase tracking-wider text-accent">Placed</span>}
+                      </p>
+                      <p className="text-xs text-muted mt-0.5">{t.sub}</p>
+                    </div>
+                    <span className="text-xs font-mono text-muted/60 ml-3">{t.oddsRange}</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
 
@@ -199,7 +237,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
                   const d = resultOdds[v]
                   const selected = resultPick === v
                   return (
-                    <button key={v} onClick={() => setResultPick(v)} disabled={isLocked}
+                    <button key={v} onClick={() => setResultPick(v)} disabled={formDisabled}
                       className={`py-3.5 px-1 rounded-xl border text-center transition-all duration-100 ${
                         selected ? 'border-accent/50 bg-accent/10' : 'border-border hover:border-white/15'
                       }`}>
@@ -218,15 +256,18 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
                 {(['yes', 'no'] as const).map(v => {
                   const d = v === 'yes' ? baseOdds.bttsYes : baseOdds.bttsNo
                   const selected = bttsPick === v
+                  const impossible = v === 'no' && bttsNoImpossible
                   return (
-                    <button key={v} onClick={() => setBttsPick(v)} disabled={isLocked}
+                    <button key={v} onClick={() => setBttsPick(v)} disabled={formDisabled || impossible}
                       className={`py-4 rounded-xl border text-center transition-all duration-100 ${
                         selected ? 'border-accent/50 bg-accent/10' : 'border-border hover:border-white/15'
-                      }`}>
+                      } ${impossible ? 'opacity-40 cursor-not-allowed line-through' : ''}`}>
                       <div className={`font-bold text-sm ${selected ? 'text-accent' : 'text-text'}`}>
                         {v === 'yes' ? '⚽ Yes' : '🧤 No'}
                       </div>
-                      <div className={`text-[11px] font-mono mt-1 ${selected ? 'text-accent/70' : 'text-muted/60'}`}>{fmtOdds(d)}</div>
+                      <div className={`text-[11px] font-mono mt-1 ${selected ? 'text-accent/70' : 'text-muted/60'}`}>
+                        {impossible ? 'impossible' : fmtOdds(d)}
+                      </div>
                     </button>
                   )
                 })}
@@ -238,18 +279,28 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
                 <div className="flex items-end gap-4 justify-center">
                   <div className="text-center">
                     <p className="text-[10px] text-muted font-semibold uppercase tracking-wider mb-2">{match.home_team}</p>
-                    <input type="number" min="0" max="20" value={homeScore}
-                      onChange={e => setHomeScore(e.target.value)} disabled={isLocked}
+                    <input type="number" min={curHomeLive} max="20" value={homeScore}
+                      onChange={e => setHomeScore(e.target.value)} disabled={formDisabled}
                       className="input w-20 text-center font-mono text-2xl font-bold py-3" />
                   </div>
                   <div className="text-3xl font-mono text-muted/40 pb-2">–</div>
                   <div className="text-center">
                     <p className="text-[10px] text-muted font-semibold uppercase tracking-wider mb-2">{match.away_team}</p>
-                    <input type="number" min="0" max="20" value={awayScore}
-                      onChange={e => setAwayScore(e.target.value)} disabled={isLocked}
+                    <input type="number" min={curAwayLive} max="20" value={awayScore}
+                      onChange={e => setAwayScore(e.target.value)} disabled={formDisabled}
                       className="input w-20 text-center font-mono text-2xl font-bold py-3" />
                   </div>
                 </div>
+                {isLive && (
+                  <p className="text-center text-[11px] text-muted/60">
+                    Live score is {curHomeLive}–{curAwayLive} — picks below this are impossible.
+                  </p>
+                )}
+                {exactImpossible && (
+                  <p className="text-center text-[11px] text-danger font-semibold">
+                    Can't pick a final score below the current one.
+                  </p>
+                )}
                 <div className="text-center">
                   <span className="text-xs font-mono text-muted/60">Odds: </span>
                   <span className="text-sm font-mono font-bold text-accent">{fmtOdds(decOdds)}</span>
@@ -265,7 +316,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
               <span className="font-mono font-bold text-text">{points} pts</span>
             </div>
             <input type="range" min="10" max="100" step="5" value={points}
-              onChange={e => setPoints(Number(e.target.value))} disabled={isLocked}
+              onChange={e => setPoints(Number(e.target.value))} disabled={formDisabled}
               className="w-full accent-accent h-1 rounded-full cursor-pointer" />
             <div className="flex justify-between text-[10px] font-mono text-muted/40 mt-1.5">
               <span>10</span><span>100</span>
@@ -297,7 +348,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
           </div>
 
           {/* Double or nothing */}
-          <button onClick={() => setDbl(!dbl)} disabled={isLocked || dblBlocked}
+          <button onClick={() => setDbl(!dbl)} disabled={formDisabled || dblBlocked}
             className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border transition-all duration-150 ${
               dbl ? 'border-amber-500/40 bg-amber-500/8' : 'border-border hover:border-white/10'
             } disabled:opacity-40 disabled:cursor-not-allowed`}>
@@ -317,13 +368,19 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
 
           {error && <p className="text-danger text-sm">{error}</p>}
 
-          <button onClick={handleSubmit} disabled={loading || isLocked} className="btn-primary w-full justify-center text-center py-3">
+          <button onClick={handleSubmit}
+            disabled={loading || formDisabled || pickImpossible}
+            className="btn-primary w-full justify-center text-center py-3">
             {loading ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="w-3.5 h-3.5 border-2 border-bg/40 border-t-bg rounded-full animate-spin" />
                 Saving…
               </span>
-            ) : existing ? 'Update Prediction' : 'Lock In'}
+            ) : alreadyPlaced
+              ? 'Bet locked in'
+              : pickImpossible
+                ? 'Pick is impossible'
+                : 'Lock In'}
           </button>
         </div>
       </div>
