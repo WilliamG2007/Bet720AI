@@ -56,10 +56,12 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
     if (predType === 'btts') {
       return bttsPick === 'yes' ? baseOdds.bttsYes : baseOdds.bttsNo
     }
-    // exact_score
+    // exact_score — for live matches, condition on the goals already scored
     const h = parseInt(homeScore) || 0
     const a = parseInt(awayScore) || 0
-    return exactScoreDecimalOdds(baseOdds.homeExp, baseOdds.awayExp, h, a)
+    const curHome = match.status === 'live' ? (match.home_score ?? 0) : 0
+    const curAway = match.status === 'live' ? (match.away_score ?? 0) : 0
+    return exactScoreDecimalOdds(baseOdds.homeExp, baseOdds.awayExp, h, a, curHome, curAway)
   }
 
   const decOdds    = currentDecimalOdds()

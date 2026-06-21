@@ -101,14 +101,28 @@ export function computeMatchOdds(
   }
 }
 
-/** Decimal odds for a specific exact scoreline */
+/**
+ * Decimal odds for a specific exact scoreline.
+ *
+ * `homeExpected`/`awayExpected` are the expected FINAL goals. For a live match
+ * pass the current score in `curHome`/`curAway`: those goals are already locked
+ * in, so only the goals still to be scored (final − current) are random. A
+ * target below the current score is impossible (you can't un-score).
+ */
 export function exactScoreDecimalOdds(
   homeExpected: number,
   awayExpected: number,
   h: number,
   a: number,
+  curHome = 0,
+  curAway = 0,
 ): number {
-  const p = poissonPmf(homeExpected, h) * poissonPmf(awayExpected, a)
+  const needH = h - curHome
+  const needA = a - curAway
+  if (needH < 0 || needA < 0) return 200 // can't un-score — impossible final
+  const homeRem = Math.max(0, homeExpected - curHome)
+  const awayRem = Math.max(0, awayExpected - curAway)
+  const p = poissonPmf(homeRem, needH) * poissonPmf(awayRem, needA)
   return toDecimalOdds(Math.max(p, 0.002)) // floor at ~500x cap
 }
 
