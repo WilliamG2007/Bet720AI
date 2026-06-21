@@ -100,10 +100,20 @@ async function sbResolve(sbUrl: string, key: string, matchId: string) {
   if (!res.ok) throw new Error(`supabase rpc ${res.status}: ${await res.text()}`)
 }
 
-export default async function handler(_req: Request): Promise<Response> {
+export default async function handler(req: Request): Promise<Response> {
   const apiKey = process.env.FOOTBALL_API_KEY ?? ''
   const sbUrl  = process.env.SUPABASE_URL ?? ''
   const sbKey  = process.env.SUPABASE_SERVICE_ROLE ?? ''
+  const secret = process.env.CRON_SECRET ?? ''
+
+  // Require a shared secret so the public endpoint can't be hammered.
+  // GitHub Actions sends `Authorization: Bearer ${{ secrets.CRON_SECRET }}`.
+  if (secret) {
+    const auth = req.headers.get('authorization') ?? ''
+    if (auth !== `Bearer ${secret}`) {
+      return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 })
+    }
+  }
 
   if (!apiKey || !sbUrl || !sbKey) {
     return new Response(JSON.stringify({ error: 'missing env vars' }), { status: 500 })

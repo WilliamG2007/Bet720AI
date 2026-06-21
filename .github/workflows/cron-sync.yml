@@ -1,0 +1,28 @@
+# Triggers the Vercel /api/cron/sync endpoint every 5 minutes.
+# This replaces Vercel's native cron (locked behind Pro plan for
+# sub-daily schedules). The endpoint itself is idempotent — it pulls
+# live WC matches, reconciles stuck-IN_PLAY, and resolves predictions.
+#
+# Required GitHub repo secrets (Settings → Secrets → Actions):
+#   CRON_URL     — e.g. https://your-app.vercel.app/api/cron/sync
+#   CRON_SECRET  — any random string; must match Vercel env var of same name
+
+name: cron-sync
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:   # lets you run it manually from the Actions tab
+
+jobs:
+  hit-endpoint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping sync endpoint
+        run: |
+          response=$(curl -sS -w "\nHTTP %{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.CRON_URL }}")
+          echo "$response"
+          # Fail the action if the endpoint didn't return 2xx
+          echo "$response" | grep -q "HTTP 2" || exit 1
