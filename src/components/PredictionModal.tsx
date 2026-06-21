@@ -82,9 +82,11 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   const potential  = Math.round(points * finalMult)
   const maxLoss    = dbl ? points * 2 : points
 
-  // Live (in-play) matches remain bettable; only finished/postponed lock.
+  // Live matches are no longer bettable for points — pre-match only.
+  // (Free in-play "power-up" predictions are planned as a separate flow.)
+  // Finished/postponed lock for the same reason as before.
   const isLive     = match.status === 'live'
-  const isLocked   = match.status === 'finished' || match.status === 'postponed'
+  const isLocked   = match.status === 'finished' || match.status === 'postponed' || match.status === 'live'
   const existing   = existingPredictions.find(p => p.prediction_type === predType)
   // Bets are one-shot: once placed, that prediction type is read-only.
   const alreadyPlaced = !!existing
@@ -228,12 +230,12 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
             </div>
           )}
 
-          {isLive && !isLocked && (
-            <div className="bg-amber-500/8 border border-amber-500/25 rounded-xl px-4 py-3 flex items-center gap-2.5">
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+          {isLive && (
+            <div className="bg-danger/8 border border-danger/25 rounded-xl px-4 py-3 flex items-center gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-danger animate-pulse flex-shrink-0" />
               <div>
-                <p className="text-amber-400 text-sm font-semibold">In-Play Betting · {match.home_score ?? 0}–{match.away_score ?? 0}</p>
-                <p className="text-[11px] text-muted mt-0.5">Odds reflect the live score &amp; time remaining. Locked in when you bet.</p>
+                <p className="text-danger text-sm font-semibold">Live · {match.home_score ?? 0}–{match.away_score ?? 0} · bets closed</p>
+                <p className="text-[11px] text-muted mt-0.5">Points bets are pre-match only. In-play power-ups are coming.</p>
               </div>
             </div>
           )}
@@ -398,7 +400,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
             <div className="text-left flex-1">
               <p className="text-sm font-semibold text-text">Double or Nothing</p>
               <p className="text-[11px] text-muted mt-0.5">
-                {dblBlocked ? 'Already used this matchday' : 'Correct = 2× multiplier · Wrong = 2× loss'}
+                {dblBlocked ? 'Already used today' : 'Correct = 2× multiplier · Wrong = 2× loss'}
               </p>
             </div>
             <div className={`w-10 h-5 rounded-full relative transition-colors duration-200 ${dbl ? 'bg-amber-500' : 'bg-surface-3'}`}>
@@ -418,13 +420,17 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
               </span>
             ) : alreadyPlaced
               ? 'Bet locked in'
-              : tooEarly
-                ? 'Bets open 3h before kickoff'
-                : oddsMissing
-                  ? 'Loading odds…'
-                  : pickImpossible
-                    ? 'Pick is impossible'
-                    : 'Lock In'}
+              : isLive
+                ? 'Bets closed — match is live'
+                : match.status === 'finished' || match.status === 'postponed'
+                  ? 'Match is over'
+                  : tooEarly
+                    ? 'Bets open 3h before kickoff'
+                    : oddsMissing
+                      ? 'Loading odds…'
+                      : pickImpossible
+                        ? 'Pick is impossible'
+                        : 'Lock In'}
           </button>
         </div>
       </div>

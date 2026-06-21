@@ -74,8 +74,17 @@ export default function PredictPage() {
     return acc
   }, {})
 
-  const pointsUsed = predictions.reduce((s, p) => s + p.points_wagered, 0)
-  const hasUsedDouble = predictions.some(p => p.double_or_nothing)
+  // Daily budget — sums only today's bets (UTC midnight reset, matches
+  // the place_bet RPC). Each user gets a fresh 100 pts to spread across
+  // each day's fixtures.
+  const dayStartMs = (() => {
+    const d = new Date()
+    d.setUTCHours(0, 0, 0, 0)
+    return d.getTime()
+  })()
+  const todayPreds = predictions.filter(p => new Date(p.created_at).getTime() >= dayStartMs)
+  const pointsUsed = todayPreds.reduce((s, p) => s + p.points_wagered, 0)
+  const hasUsedDouble = todayPreds.some(p => p.double_or_nothing)
 
   if (!activeLeague) return (
     <div className="flex-1 flex items-center justify-center p-8 text-center">
@@ -101,7 +110,7 @@ export default function PredictPage() {
         {/* Budget bar */}
         <div className="card p-4 mb-5">
           <div className="flex items-center justify-between mb-2.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Matchday Budget</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Daily Budget</span>
             <span className="font-mono text-xs">
               <span className={pointsUsed > 100 ? 'text-danger font-bold' : 'text-text'}>{pointsUsed}</span>
               <span className="text-muted/50"> / 100 pts</span>
@@ -113,9 +122,10 @@ export default function PredictPage() {
           </div>
           {hasUsedDouble && (
             <p className="text-[11px] text-amber-400 mt-2 flex items-center gap-1">
-              <span>⚡</span> Double-or-Nothing used
+              <span>⚡</span> Double-or-Nothing used today
             </p>
           )}
+          <p className="text-[10px] text-muted/50 mt-2">Resets at 00:00 UTC.</p>
         </div>
 
         {loading ? (
