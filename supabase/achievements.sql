@@ -11,7 +11,9 @@
 --
 -- Run AFTER supabase/notifications.sql AND supabase/kickoff_reminders.sql
 -- (the latter widens the notifications type CHECK to include
--- 'achievement_earned'). Idempotent.
+-- 'achievement_earned'). If supabase/reasoning_and_early_bird.sql has
+-- not run yet, the 'analyst' achievement simply never unlocks until
+-- the reasoning column exists — the rest still works. Idempotent.
 -- ──────────────────────────────────────────────────────────────────────
 
 -- ── Catalogue ────────────────────────────────────────────────────────
@@ -137,9 +139,22 @@ begin
     select 1 from public.leagues where created_by = p_user_id
   ) into v_created_league;
 
-  select count(*) into v_reasoned_count
-    from public.predictions
-    where user_id = p_user_id and reasoning is not null and length(trim(reasoning)) > 0;
+  -- The reasoning column ships with reasoning_and_early_bird.sql; if
+  -- that migration hasn't run, gracefully skip the analyst criterion
+  -- so this function still works.
+  if exists (
+    select 1 from pg_attribute
+    where attrelid = 'public.predictions'::regclass
+      and attname = 'reasoning'
+      and not attisdropped
+  ) then
+    execute $sql$
+      select count(*)::int from public.predictions
+      where user_id = $1 and reasoning is not null and length(trim(reasoning)) > 0
+    $sql$ into v_reasoned_count using p_user_id;
+  else
+    v_reasoned_count := 0;
+  end if;
 
   -- ── Evaluate criteria → insert, capture only the new rows ───────────
   for rec in
