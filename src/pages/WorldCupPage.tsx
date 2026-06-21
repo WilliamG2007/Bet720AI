@@ -7,10 +7,9 @@ import type { Match, Prediction } from '../types/database'
 import { PredictionModal } from '../components/PredictionModal'
 import { TeamCrest } from '../components/TeamCrest'
 import { RiskBadge } from '../components/RiskBadge'
-import { fetchUpcomingMatches, fetchInPlayMatches, fetchRecentlyFinished, fetchMatch, fdMatchToDbMatch, COMPETITIONS } from '../lib/footballApi'
 import { estimateLiveMinute, computeLiveOdds, DEFAULT_MATCH_ODDS } from '../lib/poissonOdds'
-import { computeWcOdds } from '../lib/wcStrength'
-import { format, isPast, isToday, isTomorrow, subDays } from 'date-fns'
+import { syncCompetitionByCode } from '../lib/matchSync'
+import { format, isPast, isToday, isTomorrow } from 'date-fns'
 
 const GROUP_ORDER = [
   'GROUP_A','GROUP_B','GROUP_C','GROUP_D',
@@ -29,17 +28,6 @@ const STAGE_LABELS: Record<string, string> = {
 
 function groupLabel(g: string): string {
   return g.replace('GROUP_', 'Group ')
-}
-
-/** Add nation-strength pre-match odds to a synced WC match row. */
-function withWcOdds(row: ReturnType<typeof fdMatchToDbMatch>): Record<string, unknown> {
-  const o = computeWcOdds(row.home_team, row.away_team)
-  return {
-    ...row,
-    home_odds: o.home, draw_odds: o.draw, away_odds: o.away,
-    btts_yes_odds: o.bttsYes, btts_no_odds: o.bttsNo,
-    expected_home_goals: o.homeExpected, expected_away_goals: o.awayExpected,
-  }
 }
 
 function kickoffLabel(d: string): string {
@@ -141,14 +129,15 @@ export default function WorldCupPage() {
     setPredictions((data ?? []) as Prediction[])
   }
 
+  /**
+   * Trigger a server-side WC sync. The matches table is locked to the
+   * service role (secure_bets.sql), so all upserts happen in
+   * /api/sync/matches and we just re-read here.
+   */
   async function handleSync() {
     setSyncing(true)
     try {
-      const today   = format(new Date(), 'yyyy-MM-dd')
-      const end     = '2026-07-19'
-      const raw     = await fetchUpcomingMatches(COMPETITIONS.WC.id, today, end)
-      const rows    = raw.map(m => withWcOdds(fdMatchToDbMatch(m)))
-      await supabase.from('matches').upsert(rows, { onConflict: 'external_id' })
+      await syncCompetitionByCode('WC')
     } catch (e) {
       console.error('WC sync error:', e)
     }
@@ -157,85 +146,15 @@ export default function WorldCupPage() {
   }
 
   /**
-   * Refresh in-play matches AND reconcile any DB rows still marked 'live' that
-   * the API no longer reports as in-play (they've ended) — fetch each
-   * individually and flip them, resolving predictions when finished.
+   * Cheap DB poll for in-play status changes. The cron (running every 5min)
+   * actually writes the live score/odds; this just re-reads so the UI
+   * reflects them. Previously this function upserted to matches directly,
+   * which is no longer allowed by RLS — and recompiling live odds client
+   * side wasn't safe anyway (could be tampered with before betting).
    */
   async function syncLive() {
-    try {
-      const live = await fetchInPlayMatches(COMPETITIONS.WC.id)
-
-      // Upsert currently in-play matches
-      if (live.length) {
-        const rows = live.map(m => withWcOdds(fdMatchToDbMatch(m)))
-        const { error } = await supabase.from('matches').upsert(rows, { onConflict: 'external_id' })
-        if (error) { console.error('Live upsert failed:', error); return }
-      }
-
-      // Reconcile stale-live. Two cases:
-      //  (1) DB-live but no longer in the API's in-play list → it ended; fetch
-      //      individually and update.
-      //  (2) DB-live AND still in the in-play list BUT kicked off more than
-      //      ~3.5 hours ago → physically impossible (90 + HT + stoppage + ET +
-      //      pens fits well under that). The free-tier API is stuck reporting
-      //      IN_PLAY; force-flip to finished using the last known score.
-      const MAX_LIVE_MS = 3.5 * 60 * 60 * 1000
-      const now = Date.now()
-      const liveIds = new Set(live.map(m => m.id))
-      const { data: stale } = await supabase
-        .from('matches')
-        .select('id, external_id, kickoff_at')
-        .eq('competition', 'FIFA World Cup')
-        .eq('status', 'live')
-      const staleRows = (stale ?? []) as { id: string; external_id: number; kickoff_at: string }[]
-      for (const m of staleRows) {
-        const ageMs = now - new Date(m.kickoff_at).getTime()
-        const stuckTooLong = ageMs > MAX_LIVE_MS
-        const apiSaysOver  = !liveIds.has(m.external_id)
-        if (!stuckTooLong && !apiSaysOver) continue
-        try {
-          const fresh = await fetchMatch(m.external_id)
-          const row = fdMatchToDbMatch(fresh) as Record<string, unknown>
-          // If we've passed the physical ceiling, trust our own clock over the
-          // stuck upstream status — force the match to finished.
-          if (stuckTooLong) row.status = 'finished'
-          await supabase.from('matches').upsert(row, { onConflict: 'external_id' })
-          if (row.status === 'finished') {
-            await supabase.rpc('resolve_predictions', { p_match_id: m.id })
-          }
-        } catch (e) {
-          console.error(`Stale-live reconcile failed for ${m.external_id}:`, e)
-        }
-      }
-
-      if (live.length || staleRows.length) {
-        await loadMatches()
-        await loadPredictions()
-      }
-    } catch (e) {
-      console.error('WC live sync error:', e)
-    }
-  }
-
-  /** Resolve predictions for matches finished since yesterday. */
-  async function resolveFinished() {
-    try {
-      const today     = format(new Date(), 'yyyy-MM-dd')
-      const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd')
-      const finished  = await fetchRecentlyFinished(COMPETITIONS.WC.id, yesterday, today)
-      if (!finished.length) return
-      const rows = finished.map(fdMatchToDbMatch) as Record<string, unknown>[]
-      await supabase.from('matches').upsert(rows, { onConflict: 'external_id' })
-      const { data } = await supabase.from('matches').select('id')
-        .in('external_id', finished.map(m => m.id))
-      for (const row of (data ?? []) as { id: string }[]) {
-        await supabase.rpc('resolve_predictions', { p_match_id: row.id })
-      }
-      await loadMatches()
-      await loadPredictions()
-    } catch (e) {
-      console.error('WC resolve error:', e)
-    }
+    await loadMatches()
+    await loadPredictions()
   }
 
   useEffect(() => {
@@ -252,8 +171,8 @@ export default function WorldCupPage() {
       if (needsSync) await handleSync()
       else await loadMatches()
       await loadPredictions()
-      await syncLive()        // flip any in-play games to live on entry
-      await resolveFinished() // settle anything that finished
+      // Live flips and resolution now happen server-side in api/cron/sync.ts
+      // (every 5 min). We just re-read here.
     })()
   }, [authUser, activeLeague, tab])
 

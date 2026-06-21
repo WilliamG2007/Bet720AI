@@ -140,24 +140,27 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
     if (!authUser || formDisabled || pickImpossible) return
     setError(''); setLoading(true)
 
-    const row: Record<string, unknown> = {
-      user_id:            authUser.id,
-      match_id:           match.id,
-      league_id:          leagueId,
-      prediction_type:    predType,
-      predicted_value:    getValue(),
-      risk_tier:          riskTier,
-      points_wagered:     points,
-      double_or_nothing:  dbl,
-      resolved:           false,
-      odds_multiplier:    netMult,   // store net-profit mult (decimal - 1)
+    // All validation + odds_multiplier recomputation happens server-side
+    // in the place_bet RPC. The client values for riskTier/odds_multiplier
+    // are no longer trusted — the RPC overwrites them with the real ones
+    // computed from the matches row.
+    const { error: err } = await supabase.rpc('place_bet', {
+      p_match_id:         match.id,
+      p_league_id:        leagueId,
+      p_prediction_type:  predType,
+      p_predicted_value:  getValue(),
+      p_points_wagered:   points,
+      p_double_or_nothing: dbl,
+    })
+
+    if (err) {
+      // Surface the postgres RAISE messages verbatim — they're
+      // user-readable ("bets open 180 min before kickoff", "matchday budget
+      // exceeded", "BTTS No is impossible — both teams have scored", …).
+      setError(err.message.replace(/^.*?:\s*/, ''))
+    } else {
+      onSuccess()
     }
-
-    // Insert only — bets are final, no updates allowed.
-    const { error: err } = await supabase.from('predictions').insert(row)
-
-    if (err) setError(err.message)
-    else onSuccess()
     setLoading(false)
   }
 
