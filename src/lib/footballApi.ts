@@ -70,6 +70,8 @@ export function fdMatchToDbMatch(m: FDMatch) {
     status:       mapStatus(m.status),
     home_score:   m.score.fullTime.home ?? null,
     away_score:   m.score.fullTime.away ?? null,
+    ht_home_score: m.score.halfTime?.home ?? null,
+    ht_away_score: m.score.halfTime?.away ?? null,
     matchday:     m.matchday ?? null,
     season:       m.season?.startDate?.substring(0, 4) ?? null,
     stage:        m.stage ?? null,

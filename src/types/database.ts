@@ -88,6 +88,8 @@ export interface Database {
           status: 'scheduled' | 'live' | 'finished' | 'postponed'
           home_score: number | null
           away_score: number | null
+          ht_home_score: number | null
+          ht_away_score: number | null
           matchday: number | null
           season: string | null
           updated_at: string
@@ -113,6 +115,8 @@ export interface Database {
           status?: 'scheduled' | 'live' | 'finished' | 'postponed'
           home_score?: number | null
           away_score?: number | null
+          ht_home_score?: number | null
+          ht_away_score?: number | null
           matchday?: number | null
           season?: string | null
           updated_at?: string
@@ -138,6 +142,8 @@ export interface Database {
           status?: 'scheduled' | 'live' | 'finished' | 'postponed'
           home_score?: number | null
           away_score?: number | null
+          ht_home_score?: number | null
+          ht_away_score?: number | null
           matchday?: number | null
           season?: string | null
           updated_at?: string

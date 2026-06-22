@@ -36,15 +36,18 @@ export interface StandingsData {
 }
 
 // Poisson PMF: P(X = k) for rate lambda
-function poissonPmf(lambda: number, k: number): number {
+// Exported so the market registry (src/lib/markets/) can compose new markets
+// on top of the same primitives without duplicating the math.
+export function poissonPmf(lambda: number, k: number): number {
   if (lambda <= 0) return k === 0 ? 1 : 0
   let log = -lambda + k * Math.log(lambda)
   for (let i = 1; i <= k; i++) log -= Math.log(i)
   return Math.exp(log)
 }
 
-// Convert probability → decimal odds with a small house margin
-function toDecimalOdds(p: number, margin = 0.05): number {
+// Convert probability → decimal odds with a small house margin.
+// Exported alongside poissonPmf for the market registry.
+export function toDecimalOdds(p: number, margin = 0.05): number {
   if (p <= 0) return 200
   const raw = (1 / p) * (1 - margin)
   // Round to 2dp, cap at 200
