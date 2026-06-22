@@ -68,6 +68,16 @@ export default function MatchDetailPage() {
     return () => { cancelled = true }
   }, [matchId, activeLeague])
 
+  // Poll match data every 30 s while live — skips waiting for cron
+  useEffect(() => {
+    if (!match || match.status !== 'live') return
+    const interval = setInterval(async () => {
+      const { data } = await supabase.from('matches').select('*').eq('id', matchId).maybeSingle()
+      if (data) setMatch(data as Match)
+    }, 30_000)
+    return () => clearInterval(interval)
+  }, [matchId, match?.status])
+
   const distribution = useMemo(() => {
     const buckets = { home: 0, draw: 0, away: 0, btts_y: 0, btts_n: 0 }
     for (const { pred } of bets) {
