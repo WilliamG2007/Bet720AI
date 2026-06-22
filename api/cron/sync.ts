@@ -119,8 +119,11 @@ async function sbCallRpc(sbUrl: string, key: string, fn: string): Promise<unknow
 }
 
 export default async function handler(req: Request): Promise<Response> {
-  const apiKey = process.env.FOOTBALL_API_KEY ?? ''
-  const sbUrl  = process.env.SUPABASE_URL ?? ''
+  // Accept either the bare names or VITE_-prefixed ones — the same Vercel
+  // project also stores the client-side keys for the Vite bundle, so we
+  // can reuse the URL/api key without duplicating them.
+  const apiKey = process.env.FOOTBALL_API_KEY || process.env.VITE_FOOTBALL_API_KEY || ''
+  const sbUrl  = process.env.SUPABASE_URL    || process.env.VITE_SUPABASE_URL    || ''
   const sbKey  = process.env.SUPABASE_SERVICE_ROLE ?? ''
   const secret = process.env.CRON_SECRET ?? ''
 

@@ -149,7 +149,9 @@ export default async function handler(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ error: 'method not allowed' }), { status: 405 })
   }
 
-  const sbUrl = process.env.SUPABASE_URL ?? ''
+  // Same fallback as the fd-api proxy + cron: the Vite-bundle vars carry
+  // the URL we need, so don't force the user to set duplicates.
+  const sbUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
   const sbKey = process.env.SUPABASE_SERVICE_ROLE ?? ''
   if (!sbUrl || !sbKey) {
     return new Response(JSON.stringify({ error: 'missing env vars' }), { status: 500 })
