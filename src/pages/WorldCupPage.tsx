@@ -9,7 +9,7 @@ import { TeamCrest } from '../components/TeamCrest'
 import { RiskBadge } from '../components/RiskBadge'
 import { estimateLiveMinute, computeLiveOdds, DEFAULT_MATCH_ODDS } from '../lib/poissonOdds'
 import { syncCompetitionByCode } from '../lib/matchSync'
-import { format, isPast, isToday, isTomorrow } from 'date-fns'
+import { format, isToday, isTomorrow } from 'date-fns'
 
 const GROUP_ORDER = [
   'GROUP_A','GROUP_B','GROUP_C','GROUP_D',
@@ -110,10 +110,14 @@ export default function WorldCupPage() {
 
   async function loadMatches() {
     setLoading(true)
+    // For non-results tabs we always pull both 'scheduled' and 'live' so the
+    // UI can recover when the cron hasn't yet flipped a match whose kickoff
+    // has passed. Client-side filters (below) decide which bucket each row
+    // belongs in based on wall-clock vs kickoff_at.
     const { data } = await supabase
       .from('matches').select('*')
       .eq('competition', 'FIFA World Cup')
-      .in('status', tab === 'results' ? ['finished'] : tab === 'live' ? ['live'] : ['scheduled', 'live'])
+      .in('status', tab === 'results' ? ['finished'] : ['scheduled', 'live'])
       .order('kickoff_at', { ascending: tab !== 'results' })
       .limit(100)
     setMatches((data ?? []) as Match[])
@@ -188,10 +192,21 @@ export default function WorldCupPage() {
     return () => clearInterval(iv)
   }, [])
 
-  // Group upcoming by group/stage
-  const liveMatches = matches.filter(m => m.status === 'live')
-  const upcomingList = matches
-    .filter(m => !isPast(new Date(m.kickoff_at)) || m.status === 'scheduled')
+  // A match whose kickoff has passed but DB still says 'scheduled' means the
+  // cron hasn't flipped it to 'live' yet (rate limit, postponed not yet
+  // reconciled, etc.). Treat it as live for UI purposes so it stops showing
+  // up in Upcoming with a permanent "Kicks off now" badge.
+  const STALE_SCHEDULED_MS = 60_000 // 1 min grace for clock skew
+  const isStaleScheduled = (m: Match) =>
+    m.status === 'scheduled' &&
+    new Date(m.kickoff_at).getTime() <= tickNow - STALE_SCHEDULED_MS
+
+  const liveMatches = matches.filter(m => m.status === 'live' || isStaleScheduled(m))
+
+  // Upcoming = scheduled rows whose kickoff is still in the future.
+  const upcomingList = matches.filter(m =>
+    m.status === 'scheduled' && !isStaleScheduled(m)
+  )
 
   const upcomingGrouped = upcomingList.reduce<Record<string, Match[]>>((acc, m) => {
     const key = m.group ? groupLabel(m.group) : (STAGE_LABELS[m.stage ?? ''] ?? m.stage ?? 'Other')
@@ -262,11 +277,16 @@ export default function WorldCupPage() {
     const preds      = predictions.filter(p => p.match_id === m.id)
     const isLive     = m.status === 'live'
     const isFinished = m.status === 'finished'
+    const isStale    = isStaleScheduled(rawM)
     // Live matches ARE bettable (in-play). Only finished/postponed lock.
-    const locked     = m.status === 'finished' || m.status === 'postponed'
+    // Stale-scheduled rows are locked too — we don't know the current state,
+    // so taking a bet on them would be unsafe.
+    const locked     = m.status === 'finished' || m.status === 'postponed' || isStale
     const minute     = isLive ? estimateLiveMinute(m.kickoff_at) : 0
     const ko         = new Date(m.kickoff_at)
-    const urg        = (!isLive && !isFinished) ? kickoffUrgency(ko, tickNow) : { tier: 0 as const, chip: null }
+    const urg        = (!isLive && !isFinished && !isStale)
+      ? kickoffUrgency(ko, tickNow)
+      : { tier: 0 as const, chip: null }
     const tier       = urg.tier
 
     return (
@@ -283,6 +303,13 @@ export default function WorldCupPage() {
               <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${URGENCY_CHIP[tier]}`}>
                 {tier >= 4 && <span className={`w-1.5 h-1.5 rounded-full ${tier === 5 ? 'bg-bg' : 'bg-accent'} animate-pulse`} />}
                 {urg.chip}
+              </span>
+            </div>
+          )}
+          {isStale && (
+            <div className="mb-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-surface-3 text-muted">
+                Awaiting kickoff update
               </span>
             </div>
           )}
