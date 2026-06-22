@@ -8,7 +8,7 @@ import { PredictionModal } from '../components/PredictionModal'
 import { TeamCrest } from '../components/TeamCrest'
 import { RiskBadge } from '../components/RiskBadge'
 import { estimateLiveMinute, computeLiveOdds } from '../lib/poissonOdds'
-import { clientFallbackOdds } from '../lib/wcStrength'
+import { clientFallbackOdds, looksLikeDefaultOdds } from '../lib/wcStrength'
 import { syncCompetitionByCode } from '../lib/matchSync'
 import { format, isToday, isTomorrow } from 'date-fns'
 
@@ -165,14 +165,16 @@ export default function WorldCupPage() {
   useEffect(() => {
     ;(async () => {
       const { data: head } = await supabase
-        .from('matches').select('id, home_odds')
+        .from('matches').select('id, home_odds, draw_odds, away_odds')
         .eq('competition', 'FIFA World Cup')
         .in('status', ['scheduled', 'live'])
         .limit(20)
-      const rows = (head ?? []) as { id: string; home_odds: number | null }[]
-      // Sync if empty OR any pre-match row is missing nation-strength odds
-      // (avoids showing the 2.15/3.40/3.60 DEFAULT_MATCH_ODDS fallback).
-      const needsSync = rows.length === 0 || rows.some(r => r.home_odds == null)
+      const rows = (head ?? []) as { id: string; home_odds: number | null; draw_odds: number | null; away_odds: number | null }[]
+      // Sync if empty, missing odds, OR any row is stuck on the neutral
+      // DEFAULT_MATCH_ODDS fallback. The /api/sync/matches sweep will
+      // re-price WC rows from nation strength.
+      const needsSync = rows.length === 0
+        || rows.some(r => r.home_odds == null || looksLikeDefaultOdds(r as never))
       if (needsSync) await handleSync()
       else await loadMatches()
       await loadPredictions()
@@ -249,11 +251,13 @@ export default function WorldCupPage() {
    */
   function withComputedOdds(m: Match): Match {
     // Compute nation-strength fallback odds upfront so live + pre-match paths
-    // both get the same realistic baseline when the DB still has NULL/stale
-    // values (e.g. row inserted before /api/sync/matches priced it).
-    const fb      = clientFallbackOdds(m)
-    const homeExp = m.expected_home_goals ?? fb.homeExpected
-    const awayExp = m.expected_away_goals ?? fb.awayExpected
+    // both get the same realistic baseline. We use the fallback when the DB
+    // has NULL odds OR is stuck on the neutral DEFAULT_MATCH_ODDS values
+    // (e.g. row inserted before the sweep re-priced it).
+    const fb       = clientFallbackOdds(m)
+    const stuckOnDefault = looksLikeDefaultOdds(m)
+    const homeExp  = (m.expected_home_goals == null || stuckOnDefault) ? fb.homeExpected : m.expected_home_goals
+    const awayExp  = (m.expected_away_goals == null || stuckOnDefault) ? fb.awayExpected : m.expected_away_goals
 
     if (m.status === 'live') {
       const minute = estimateLiveMinute(m.kickoff_at)
@@ -265,13 +269,15 @@ export default function WorldCupPage() {
         expected_home_goals: o.homeExpected, expected_away_goals: o.awayExpected,
       }
     }
+    const pick = <T,>(dbVal: T | null | undefined, fbVal: T): T =>
+      (dbVal == null || stuckOnDefault) ? fbVal : dbVal
     return {
       ...m,
-      home_odds:     m.home_odds     ?? fb.home,
-      draw_odds:     m.draw_odds     ?? fb.draw,
-      away_odds:     m.away_odds     ?? fb.away,
-      btts_yes_odds: m.btts_yes_odds ?? fb.bttsYes,
-      btts_no_odds:  m.btts_no_odds  ?? fb.bttsNo,
+      home_odds:     pick(m.home_odds,     fb.home),
+      draw_odds:     pick(m.draw_odds,     fb.draw),
+      away_odds:     pick(m.away_odds,     fb.away),
+      btts_yes_odds: pick(m.btts_yes_odds, fb.bttsYes),
+      btts_no_odds:  pick(m.btts_no_odds,  fb.bttsNo),
       expected_home_goals: homeExp,
       expected_away_goals: awayExp,
     }

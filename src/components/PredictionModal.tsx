@@ -11,7 +11,7 @@ import {
   decimalToMultiplier,
   oddsToRiskTier,
 } from '../lib/poissonOdds'
-import { clientFallbackOdds } from '../lib/wcStrength'
+import { clientFallbackOdds, looksLikeDefaultOdds } from '../lib/wcStrength'
 
 interface Props {
   match: Match
@@ -46,13 +46,21 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   // Real odds haven't landed yet (NULL in DB) — display defaults but DON'T
   // let the user lock in a bet against them, otherwise heavy favourites
   // would pay out at the neutral 2.15/3.60 fallback.
-  const oddsMissing = match.home_odds == null || match.away_odds == null
+  // A WC row stuck on the literal DEFAULT_MATCH_ODDS values gets the same
+  // treatment — place_bet would settle against those defaults, which is
+  // wrong for nation matchups.
+  const stuckOnDefault = match.competition === 'FIFA World Cup' && looksLikeDefaultOdds(match)
+  const oddsMissing = match.home_odds == null || match.away_odds == null || stuckOnDefault
 
-  // For WC matches without DB odds, fall back to nation-strength Poisson.
-  // The same function runs server-side in /api/sync/matches, so place_bet
-  // will settle against the same numbers the user sees here.
+  // For WC matches without DB odds (or stuck on defaults), fall back to
+  // nation-strength Poisson — what the user previews here matches what
+  // /api/sync/matches will write to the DB on the next sweep.
   const fb = clientFallbackOdds(match)
-  const baseOdds = {
+  const baseOdds = stuckOnDefault ? {
+    home: fb.home, draw: fb.draw, away: fb.away,
+    bttsYes: fb.bttsYes, bttsNo: fb.bttsNo,
+    homeExp: fb.homeExpected, awayExp: fb.awayExpected,
+  } : {
     home:     match.home_odds     ?? fb.home,
     draw:     match.draw_odds     ?? fb.draw,
     away:     match.away_odds     ?? fb.away,

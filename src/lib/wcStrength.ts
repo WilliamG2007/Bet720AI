@@ -92,3 +92,17 @@ export function clientFallbackOdds(match: Pick<Match, 'competition' | 'home_team
   }
   return DEFAULT_MATCH_ODDS
 }
+
+/**
+ * Detect a row whose odds were saved as the neutral DEFAULT_MATCH_ODDS
+ * fallback. Happens when /api/sync/matches wrote defaults (no standings,
+ * older code path, etc.) and the cron hasn't yet swept it. For WC matches
+ * this is always a bug — the row should have nation-strength odds. We treat
+ * such rows as "odds not ready" so the user doesn't place a bet against
+ * 2.15/3.40/3.60 on a Spain-vs-Saudi-Arabia matchup.
+ */
+export function looksLikeDefaultOdds(match: Pick<Match, 'home_odds' | 'draw_odds' | 'away_odds'>): boolean {
+  return match.home_odds === DEFAULT_MATCH_ODDS.home
+      && match.draw_odds === DEFAULT_MATCH_ODDS.draw
+      && match.away_odds === DEFAULT_MATCH_ODDS.away
+}
