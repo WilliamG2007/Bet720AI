@@ -1,4 +1,4 @@
-# Triggers the Vercel /api/cron/sync endpoint every 5 minutes.
+# Triggers the Vercel /api/cron/sync endpoint every 1 minute.
 # This replaces Vercel's native cron (locked behind Pro plan for
 # sub-daily schedules). The endpoint itself is idempotent — it pulls
 # live WC matches, reconciles stuck-IN_PLAY, and resolves predictions.
@@ -11,7 +11,7 @@ name: cron-sync
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/1 * * * *"
   workflow_dispatch:   # lets you run it manually from the Actions tab
 
 jobs:
