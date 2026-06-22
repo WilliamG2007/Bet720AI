@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import type { Prediction, Match } from '../types/database'
+import type { Bet, Match } from '../types/database'
 
 interface ToastItem {
   id: string
@@ -26,18 +26,22 @@ export function ResolutionToast() {
   useEffect(() => {
     if (!authUser) return
 
-    async function push(p: Prediction) {
+    async function push(bet: Bet) {
       // Skip if we already saw this resolution this session
-      if (toasts.some(t => t.id === p.id)) return
+      if (toasts.some(t => t.id === bet.id)) return
+      // For a single-leg bet we can look up the match via the leg.
+      const { data: legRaw } = await supabase
+        .from('bet_legs').select('match_id').eq('bet_id', bet.id).limit(1).single()
+      if (!legRaw) return
       const { data: matchRaw } = await supabase
         .from('matches').select('home_team,away_team,home_score,away_score')
-        .eq('id', p.match_id).single()
+        .eq('id', legRaw.match_id).single()
       const m = matchRaw as Pick<Match, 'home_team' | 'away_team' | 'home_score' | 'away_score'> | null
       if (!m) return
       const item: ToastItem = {
-        id: p.id,
-        won: (p.points_won ?? 0) > 0,
-        points: p.points_won ?? 0,
+        id: bet.id,
+        won: (bet.payout ?? 0) > 0,
+        points: bet.payout ?? 0,
         homeTeam: m.home_team,
         awayTeam: m.away_team,
         homeScore: m.home_score,
@@ -53,12 +57,12 @@ export function ResolutionToast() {
       .channel(`resolutions:${authUser.id}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'predictions', filter: `user_id=eq.${authUser.id}` },
+        { event: 'UPDATE', schema: 'public', table: 'bets', filter: `user_id=eq.${authUser.id}` },
         payload => {
-          const newRow = payload.new as Prediction
-          const oldRow = payload.old as Partial<Prediction>
-          // Only pop when transitioning to resolved
-          if (newRow.resolved && !oldRow.resolved) push(newRow)
+          const newRow = payload.new as Bet
+          const oldRow = payload.old as Partial<Bet>
+          // Only pop when transitioning out of pending
+          if (newRow.status !== 'pending' && oldRow.status === 'pending') push(newRow)
         }
       )
       .subscribe()

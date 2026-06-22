@@ -163,18 +163,15 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
     if (!authUser || formDisabled || pickImpossible) return
     setError(''); setLoading(true)
 
-    // All validation + odds_multiplier recomputation happens server-side
-    // in the place_bet RPC. The client values for riskTier/odds_multiplier
-    // are no longer trusted — the RPC overwrites them with the real ones
-    // computed from the matches row.
-    const { error: err } = await supabase.rpc('place_bet', {
-      p_match_id:         match.id,
-      p_league_id:        leagueId,
-      p_prediction_type:  predType,
-      p_predicted_value:  getValue(),
-      p_points_wagered:   points,
+    // All validation + odds recomputation happens server-side in place_bet_v2.
+    // Client-supplied odds are ignored; the server reprices from the matches row.
+    const marketType = predType === 'result' ? '1x2' : predType
+    const { error: err } = await supabase.rpc('place_bet_v2', {
+      p_league_id:         leagueId,
+      p_legs:              [{ match_id: match.id, market_type: marketType, params: {}, selection: getValue() }],
+      p_stake:             points,
       p_double_or_nothing: dbl,
-      p_reasoning:        reasoning.trim() || null,
+      p_reasoning:         reasoning.trim() || null,
     })
 
     if (err) {

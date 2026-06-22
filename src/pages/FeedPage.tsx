@@ -61,7 +61,7 @@ export default function FeedPage() {
     const [{ data: matchesRaw }, { data: usersRaw }, { data: reactionsRaw }] = await Promise.all([
       supabase.from('matches').select('*').in('id', matchIds),
       supabase.from('users').select('*').in('id', userIds),
-      supabase.from('feed_reactions').select('*').in('prediction_id', predIds),
+      supabase.from('feed_reactions').select('*').in('bet_id', predIds),
     ])
     const matches   = (matchesRaw   ?? []) as Match[]
     const users     = (usersRaw     ?? []) as User[]
@@ -75,7 +75,7 @@ export default function FeedPage() {
         prediction: p,
         match:      matchMap[p.match_id],
         user:       userMap[p.user_id],
-        reactions:  reactions.filter(r => r.prediction_id === p.id),
+        reactions:  reactions.filter(r => r.bet_id === p.id),
       })).filter(i => i.match && i.user)
     )
     setLoading(false)
@@ -96,7 +96,7 @@ export default function FeedPage() {
     loadLive()
     if (!activeLeague) return
     const channel = supabase.channel(`feed:${activeLeague.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'predictions', filter: `league_id=eq.${activeLeague.id}` }, () => loadFeed())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bets', filter: `league_id=eq.${activeLeague.id}` }, () => loadFeed())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'feed_reactions' }, () => loadFeed())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => loadLive())
       .subscribe()
@@ -110,7 +110,7 @@ export default function FeedPage() {
     if (mine) {
       await supabase.from('feed_reactions').delete().eq('id', mine.id as string)
     } else {
-      await supabase.from('feed_reactions').insert({ prediction_id: predId, user_id: authUser.id, emoji } as Record<string, unknown>)
+      await supabase.from('feed_reactions').insert({ bet_id: predId, user_id: authUser.id, emoji } as Record<string, unknown>)
     }
     loadFeed()
   }

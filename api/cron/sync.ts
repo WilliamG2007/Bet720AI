@@ -94,7 +94,7 @@ async function sbSelectLiveIds(sbUrl: string, key: string): Promise<{ id: string
 }
 
 async function sbResolve(sbUrl: string, key: string, matchId: string) {
-  const res = await fetch(`${sbUrl}/rest/v1/rpc/resolve_predictions`, {
+  const res = await fetch(`${sbUrl}/rest/v1/rpc/resolve_bets_for_match`, {
     method: 'POST',
     headers: {
       apikey: key,

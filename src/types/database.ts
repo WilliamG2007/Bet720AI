@@ -280,24 +280,103 @@ export interface Database {
       feed_reactions: {
         Row: {
           id: string
-          prediction_id: string
+          bet_id: string
           user_id: string
           emoji: string
           created_at: string
         }
         Insert: {
           id?: string
-          prediction_id: string
+          bet_id: string
           user_id: string
           emoji: string
           created_at?: string
         }
         Update: {
           id?: string
-          prediction_id?: string
+          bet_id?: string
           user_id?: string
           emoji?: string
           created_at?: string
+        }
+      }
+      bets: {
+        Row: {
+          id: string
+          user_id: string
+          league_id: string
+          stake: number
+          combined_multiplier: number
+          potential_payout: number
+          status: 'pending' | 'won' | 'lost' | 'void'
+          payout: number | null
+          double_or_nothing: boolean
+          reasoning: string | null
+          created_at: string
+          settled_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          league_id: string
+          stake: number
+          combined_multiplier: number
+          potential_payout: number
+          status?: 'pending' | 'won' | 'lost' | 'void'
+          payout?: number | null
+          double_or_nothing?: boolean
+          reasoning?: string | null
+          created_at?: string
+          settled_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          league_id?: string
+          stake?: number
+          combined_multiplier?: number
+          potential_payout?: number
+          status?: 'pending' | 'won' | 'lost' | 'void'
+          payout?: number | null
+          double_or_nothing?: boolean
+          reasoning?: string | null
+          created_at?: string
+          settled_at?: string | null
+        }
+      }
+      bet_legs: {
+        Row: {
+          id: string
+          bet_id: string
+          match_id: string
+          market_type: string
+          params: Json
+          selection: string
+          leg_decimal_odds: number
+          leg_status: 'pending' | 'won' | 'lost' | 'void'
+          settled_at: string | null
+        }
+        Insert: {
+          id?: string
+          bet_id: string
+          match_id: string
+          market_type: string
+          params?: Json
+          selection: string
+          leg_decimal_odds: number
+          leg_status?: 'pending' | 'won' | 'lost' | 'void'
+          settled_at?: string | null
+        }
+        Update: {
+          id?: string
+          bet_id?: string
+          match_id?: string
+          market_type?: string
+          params?: Json
+          selection?: string
+          leg_decimal_odds?: number
+          leg_status?: 'pending' | 'won' | 'lost' | 'void'
+          settled_at?: string | null
         }
       }
     }
@@ -311,6 +390,10 @@ export type LeagueMember = Database['public']['Tables']['league_members']['Row']
 export type Match = Database['public']['Tables']['matches']['Row']
 export type Prediction = Database['public']['Tables']['predictions']['Row']
 export type FeedReaction = Database['public']['Tables']['feed_reactions']['Row']
+export type Bet = Database['public']['Tables']['bets']['Row']
+export type BetLeg = Database['public']['Tables']['bet_legs']['Row']
+export type BetStatus = Bet['status']
+export type LegStatus = BetLeg['leg_status']
 export type Notification = Database['public']['Tables']['notifications']['Row']
 export type NotificationType = Notification['type']
 export type Achievement = Database['public']['Tables']['achievements']['Row']
