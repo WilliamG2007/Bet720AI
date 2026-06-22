@@ -151,7 +151,10 @@ update public.feed_reactions fr
  where b._legacy_prediction_id = fr.prediction_id
    and fr.bet_id is null;
 
--- 4c. Drop old unique constraint + FK + column (only if still present).
+-- 4c. Drop old RLS policy first (it references prediction_id), then
+--     drop constraints + column.
+drop policy if exists "League members can view reactions" on public.feed_reactions;
+
 do $$
 begin
   if exists (
