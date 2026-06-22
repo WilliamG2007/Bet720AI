@@ -13,7 +13,7 @@ import {
   oddsToRiskTier,
 } from '../lib/poissonOdds'
 import { priceLeg } from '../lib/markets'
-import type { MatchPricingInputs } from '../lib/markets'
+import type { MatchPricingInputs, MarketParams } from '../lib/markets'
 import { clientFallbackOdds, looksLikeDefaultOdds } from '../lib/wcStrength'
 
 interface Props {
@@ -79,7 +79,7 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
     awayExp:  match.expected_away_goals ?? fb.awayExpected,
   }
 
-  function getParams(): Record<string, unknown> {
+  function getParams(): MarketParams {
     if (predType === 'ou_goals') return { line: ouLine }
     return {}
   }

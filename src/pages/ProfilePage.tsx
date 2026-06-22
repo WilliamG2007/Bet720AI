@@ -9,7 +9,7 @@ import { TeamCrest } from '../components/TeamCrest'
 import { format } from 'date-fns'
 
 interface PredWithMatch { pred: Prediction; match: Match }
-type StatsByType = { [K in Prediction['prediction_type']]: { wins: number; total: number } }
+type StatsByType = Record<string, { wins: number; total: number }>
 
 const TYPE_LABELS: Record<string, string> = { result: 'Match Result', exact_score: 'Exact Score', btts: 'BTTS' }
 
@@ -41,6 +41,7 @@ export default function ProfilePage() {
       const statMap: StatsByType = { result: { wins: 0, total: 0 }, exact_score: { wins: 0, total: 0 }, btts: { wins: 0, total: 0 } }
       let won = 0, lost = 0
       for (const { pred: p } of hist.filter(x => x.pred.resolved)) {
+        statMap[p.prediction_type] ??= { wins: 0, total: 0 }
         statMap[p.prediction_type].total++
         if ((p.points_won ?? 0) > 0) { statMap[p.prediction_type].wins++; won += p.points_won! }
         else lost += Math.abs(p.points_won ?? 0)
