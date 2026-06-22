@@ -52,14 +52,14 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState('')
 
-  // Real odds haven't landed yet (NULL in DB) — display defaults but DON'T
-  // let the user lock in a bet against them, otherwise heavy favourites
-  // would pay out at the neutral 2.15/3.60 fallback.
-  // A WC row stuck on the literal DEFAULT_MATCH_ODDS values gets the same
-  // treatment — place_bet would settle against those defaults, which is
-  // wrong for nation matchups.
+  // For WC matches: null odds OR DEFAULT_MATCH_ODDS values are unacceptable —
+  // those rows should have nation-strength odds and settling against 2.15/3.60
+  // would be wrong. Block betting until real odds land.
+  // For non-WC matches: null odds fall back to DEFAULT_MATCH_ODDS which is a
+  // reasonable neutral assumption for club fixtures; betting is allowed.
   const stuckOnDefault = match.competition === 'FIFA World Cup' && looksLikeDefaultOdds(match)
-  const oddsMissing = match.home_odds == null || match.away_odds == null || stuckOnDefault
+  const oddsMissing = stuckOnDefault ||
+    (match.competition === 'FIFA World Cup' && (match.home_odds == null || match.away_odds == null))
 
   // For WC matches without DB odds (or stuck on defaults), fall back to
   // nation-strength Poisson — what the user previews here matches what
