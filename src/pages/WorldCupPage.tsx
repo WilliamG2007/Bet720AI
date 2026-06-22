@@ -7,7 +7,8 @@ import type { Match, Prediction } from '../types/database'
 import { PredictionModal } from '../components/PredictionModal'
 import { TeamCrest } from '../components/TeamCrest'
 import { RiskBadge } from '../components/RiskBadge'
-import { estimateLiveMinute, computeLiveOdds, DEFAULT_MATCH_ODDS } from '../lib/poissonOdds'
+import { estimateLiveMinute, computeLiveOdds } from '../lib/poissonOdds'
+import { clientFallbackOdds } from '../lib/wcStrength'
 import { syncCompetitionByCode } from '../lib/matchSync'
 import { format, isToday, isTomorrow } from 'date-fns'
 
@@ -247,8 +248,12 @@ export default function WorldCupPage() {
    * matches use stored/default pre-match odds.
    */
   function withComputedOdds(m: Match): Match {
-    const homeExp = m.expected_home_goals ?? DEFAULT_MATCH_ODDS.homeExpected
-    const awayExp = m.expected_away_goals ?? DEFAULT_MATCH_ODDS.awayExpected
+    // Compute nation-strength fallback odds upfront so live + pre-match paths
+    // both get the same realistic baseline when the DB still has NULL/stale
+    // values (e.g. row inserted before /api/sync/matches priced it).
+    const fb      = clientFallbackOdds(m)
+    const homeExp = m.expected_home_goals ?? fb.homeExpected
+    const awayExp = m.expected_away_goals ?? fb.awayExpected
 
     if (m.status === 'live') {
       const minute = estimateLiveMinute(m.kickoff_at)
@@ -262,11 +267,11 @@ export default function WorldCupPage() {
     }
     return {
       ...m,
-      home_odds:     m.home_odds     ?? DEFAULT_MATCH_ODDS.home,
-      draw_odds:     m.draw_odds     ?? DEFAULT_MATCH_ODDS.draw,
-      away_odds:     m.away_odds     ?? DEFAULT_MATCH_ODDS.away,
-      btts_yes_odds: m.btts_yes_odds ?? DEFAULT_MATCH_ODDS.bttsYes,
-      btts_no_odds:  m.btts_no_odds  ?? DEFAULT_MATCH_ODDS.bttsNo,
+      home_odds:     m.home_odds     ?? fb.home,
+      draw_odds:     m.draw_odds     ?? fb.draw,
+      away_odds:     m.away_odds     ?? fb.away,
+      btts_yes_odds: m.btts_yes_odds ?? fb.bttsYes,
+      btts_no_odds:  m.btts_no_odds  ?? fb.bttsNo,
       expected_home_goals: homeExp,
       expected_away_goals: awayExp,
     }

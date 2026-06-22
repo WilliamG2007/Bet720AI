@@ -8,7 +8,8 @@
  * matchup into expected goals, so e.g. Germany is correctly favoured over
  * Ivory Coast.
  */
-import { computeMatchOdds, type MatchOdds, type TeamStrengths } from './poissonOdds'
+import { computeMatchOdds, DEFAULT_MATCH_ODDS, type MatchOdds, type TeamStrengths } from './poissonOdds'
+import type { Match } from '../types/database'
 
 // Neutral-venue baseline goals for an evenly-matched tie.
 const BASE_HOME = 1.35
@@ -72,4 +73,22 @@ export function computeWcOdds(homeTeam: string, awayTeam: string): MatchOdds {
 
   // leagueAvg here is the neutral-venue baseline; homeExp = rHome/rAway * BASE.
   return computeMatchOdds(home, away, BASE_HOME, BASE_AWAY)
+}
+
+/**
+ * Best-effort pre-match odds when a row hasn't been priced yet (NULL DB odds).
+ *
+ * For FIFA World Cup matches we recompute from nation-strength ratings, so the
+ * UI never shows the 2.15/3.40/3.60 DEFAULT_MATCH_ODDS fallback. The same
+ * function is mirrored server-side in api/sync/matches.ts so the odds the
+ * user sees in the modal are the odds place_bet settles against.
+ *
+ * For non-WC matches without standings data, fall back to neutral defaults
+ * (we have no team-strength tables for those leagues yet).
+ */
+export function clientFallbackOdds(match: Pick<Match, 'competition' | 'home_team' | 'away_team'>): MatchOdds {
+  if (match.competition === 'FIFA World Cup') {
+    return computeWcOdds(match.home_team, match.away_team)
+  }
+  return DEFAULT_MATCH_ODDS
 }

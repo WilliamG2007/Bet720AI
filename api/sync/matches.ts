@@ -18,6 +18,8 @@ import { parseStandings, computeMatchOdds, DEFAULT_MATCH_ODDS } from '../../src/
 import type { StandingEntry } from '../../src/lib/poissonOdds'
 import { computeWcOdds } from '../../src/lib/wcStrength'
 
+const WC_NAME = 'FIFA World Cup'
+
 export const config = { runtime: 'edge' }
 
 const SYNC_COMPETITIONS = [
@@ -108,6 +110,40 @@ async function syncCompetition(compId: number, sbUrl: string, sbKey: string): Pr
   return rows.length
 }
 
+/**
+ * Defensive sweep: walks every scheduled WC match in the DB and re-prices
+ * it from home_team/away_team via the nation-strength model. Catches rows
+ * that the football-data /matches feed didn't return this tick (date
+ * window, rate-limit, transient error) and would otherwise stay frozen on
+ * stale or DEFAULT_MATCH_ODDS values.
+ *
+ * Cheap: one SELECT + one bulk UPSERT, no external HTTP.
+ */
+async function repriceScheduledWc(sbUrl: string, sbKey: string): Promise<number> {
+  const selUrl = `${sbUrl}/rest/v1/matches?select=id,external_id,home_team,away_team&status=eq.scheduled&competition=eq.${encodeURIComponent(WC_NAME)}`
+  const sel = await fetch(selUrl, { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } })
+  if (!sel.ok) throw new Error(`reprice select ${sel.status}: ${await sel.text()}`)
+  const rows = (await sel.json()) as { id: string; external_id: number; home_team: string; away_team: string }[]
+  if (!rows.length) return 0
+
+  const updates = rows.map(r => {
+    const odds = computeWcOdds(r.home_team, r.away_team)
+    return {
+      external_id:         r.external_id,
+      home_odds:           odds.home,
+      draw_odds:           odds.draw,
+      away_odds:           odds.away,
+      btts_yes_odds:       odds.bttsYes,
+      btts_no_odds:        odds.bttsNo,
+      expected_home_goals: odds.homeExpected,
+      expected_away_goals: odds.awayExpected,
+    }
+  })
+
+  await sbUpsert(sbUrl, sbKey, updates)
+  return updates.length
+}
+
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST' && req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'method not allowed' }), { status: 405 })
@@ -134,6 +170,16 @@ export default async function handler(req: Request): Promise<Response> {
       stats[`comp_${compId}`] = await syncCompetition(compId, sbUrl, sbKey)
     } catch (e) {
       stats[`error_${compId}`] = (e as Error).message
+    }
+  }
+
+  // Always run the WC reprice sweep if WC was in the targets — covers rows
+  // whose external_id wasn't returned by football-data this tick.
+  if (targets.includes(COMPETITIONS.WC.id)) {
+    try {
+      stats.wcReprice = await repriceScheduledWc(sbUrl, sbKey)
+    } catch (e) {
+      stats.wcRepriceError = (e as Error).message
     }
   }
 

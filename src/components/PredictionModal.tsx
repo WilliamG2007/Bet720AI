@@ -10,8 +10,8 @@ import {
   exactScoreDecimalOdds,
   decimalToMultiplier,
   oddsToRiskTier,
-  DEFAULT_MATCH_ODDS,
 } from '../lib/poissonOdds'
+import { clientFallbackOdds } from '../lib/wcStrength'
 
 interface Props {
   match: Match
@@ -48,15 +48,18 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   // would pay out at the neutral 2.15/3.60 fallback.
   const oddsMissing = match.home_odds == null || match.away_odds == null
 
-  // Use match odds if available, fall back to neutral defaults
+  // For WC matches without DB odds, fall back to nation-strength Poisson.
+  // The same function runs server-side in /api/sync/matches, so place_bet
+  // will settle against the same numbers the user sees here.
+  const fb = clientFallbackOdds(match)
   const baseOdds = {
-    home:     match.home_odds     ?? DEFAULT_MATCH_ODDS.home,
-    draw:     match.draw_odds     ?? DEFAULT_MATCH_ODDS.draw,
-    away:     match.away_odds     ?? DEFAULT_MATCH_ODDS.away,
-    bttsYes:  match.btts_yes_odds ?? DEFAULT_MATCH_ODDS.bttsYes,
-    bttsNo:   match.btts_no_odds  ?? DEFAULT_MATCH_ODDS.bttsNo,
-    homeExp:  match.expected_home_goals ?? DEFAULT_MATCH_ODDS.homeExpected,
-    awayExp:  match.expected_away_goals ?? DEFAULT_MATCH_ODDS.awayExpected,
+    home:     match.home_odds     ?? fb.home,
+    draw:     match.draw_odds     ?? fb.draw,
+    away:     match.away_odds     ?? fb.away,
+    bttsYes:  match.btts_yes_odds ?? fb.bttsYes,
+    bttsNo:   match.btts_no_odds  ?? fb.bttsNo,
+    homeExp:  match.expected_home_goals ?? fb.homeExpected,
+    awayExp:  match.expected_away_goals ?? fb.awayExpected,
   }
 
   // Decimal odds for the currently selected pick
