@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { LeagueProvider } from './contexts/LeagueContext'
+import { BetSlipProvider } from './contexts/BetSlipContext'
+import { BetSlip } from './components/BetSlip'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { Layout } from './components/Layout'
 import AuthPage from './pages/AuthPage'
@@ -17,6 +19,8 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <LeagueProvider>
+          <BetSlipProvider>
+          <BetSlip />
           <Routes>
             <Route path="/auth" element={<AuthPage />} />
             <Route element={<ProtectedRoute />}>
@@ -32,6 +36,7 @@ export default function App() {
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </BetSlipProvider>
         </LeagueProvider>
       </AuthProvider>
     </BrowserRouter>

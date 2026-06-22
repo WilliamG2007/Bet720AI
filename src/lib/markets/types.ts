@@ -25,8 +25,9 @@ export type MarketType =
   | '1x2'
   | 'btts'
   | 'exact_score'
-  // Phase 2 will register more: 'ou_goals' | 'double_chance' | 'draw_no_bet'
-  // | 'ht_result' | 'ht_ft' | 'team_total' | 'winning_margin' | 'odd_even'
+  | 'ou_goals'
+  | 'double_chance'
+  | 'draw_no_bet'
 
 /**
  * Per-market-instance parameters. e.g. for `ou_goals` this would be `{line: 2.5}`,

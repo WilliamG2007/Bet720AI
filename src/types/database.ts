@@ -164,7 +164,7 @@ export interface Database {
           user_id: string
           match_id: string
           league_id: string
-          prediction_type: 'result' | 'exact_score' | 'btts'
+          prediction_type: PredictionType
           predicted_value: string
           risk_tier: 'low' | 'medium' | 'high'
           points_wagered: number
@@ -180,7 +180,7 @@ export interface Database {
           user_id: string
           match_id: string
           league_id: string
-          prediction_type: 'result' | 'exact_score' | 'btts'
+          prediction_type: PredictionType
           predicted_value: string
           risk_tier: 'low' | 'medium' | 'high'
           points_wagered: number
@@ -399,6 +399,6 @@ export type NotificationType = Notification['type']
 export type Achievement = Database['public']['Tables']['achievements']['Row']
 export type UserAchievement = Database['public']['Tables']['user_achievements']['Row']
 
-export type PredictionType = 'result' | 'exact_score' | 'btts'
+export type PredictionType = 'result' | 'exact_score' | 'btts' | 'ou_goals' | 'double_chance' | 'draw_no_bet'
 export type RiskTier = 'low' | 'medium' | 'high'
 export type MatchStatus = 'scheduled' | 'live' | 'finished' | 'postponed'

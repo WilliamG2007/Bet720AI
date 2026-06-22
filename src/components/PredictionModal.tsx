@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { X, Zap } from 'lucide-react'
+import { X, Zap, PlusCircle } from 'lucide-react'
 import { format, formatDistanceToNowStrict } from 'date-fns'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { useBetSlip } from '../contexts/BetSlipContext'
 import type { Match, Prediction, PredictionType, RiskTier } from '../types/database'
 import { TeamCrest } from './TeamCrest'
 import { RiskBadge } from './RiskBadge'
@@ -11,6 +12,8 @@ import {
   decimalToMultiplier,
   oddsToRiskTier,
 } from '../lib/poissonOdds'
+import { priceLeg } from '../lib/markets'
+import type { MatchPricingInputs } from '../lib/markets'
 import { clientFallbackOdds, looksLikeDefaultOdds } from '../lib/wcStrength'
 
 interface Props {
@@ -28,6 +31,7 @@ function fmtOdds(d: number): string {
 
 export function PredictionModal({ match, leagueId, existingPredictions, hasUsedDoubleOrNothing, onClose, onSuccess }: Props) {
   const { authUser } = useAuth()
+  const { addLeg, hasLeg } = useBetSlip()
   // Live current score — drives "impossible pick" gating below
   const curHomeLive = match.status === 'live' ? (match.home_score ?? 0) : 0
   const curAwayLive = match.status === 'live' ? (match.away_score ?? 0) : 0
@@ -37,6 +41,11 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
   // Default exact-score to the current score so live picks aren't auto-impossible
   const [homeScore, setHomeScore]   = useState(() => String(curHomeLive || 1))
   const [awayScore, setAwayScore]   = useState(() => String(curAwayLive))
+  // New market state
+  const [ouLine, setOuLine]         = useState(2.5)
+  const [ouPick, setOuPick]         = useState<'over' | 'under'>('over')
+  const [dcPick, setDcPick]         = useState<'1X' | 'X2' | '12'>('1X')
+  const [dnbPick, setDnbPick]       = useState<'1' | '2'>('1')
   const [points, setPoints]         = useState(25)
   const [dbl, setDbl]               = useState(false)
   const [reasoning, setReasoning]   = useState('')
@@ -70,6 +79,43 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
     awayExp:  match.expected_away_goals ?? fb.awayExpected,
   }
 
+  function getParams(): Record<string, unknown> {
+    if (predType === 'ou_goals') return { line: ouLine }
+    return {}
+  }
+
+  function getValue(): string {
+    if (predType === 'result')       return resultPick
+    if (predType === 'btts')         return bttsPick
+    if (predType === 'exact_score')  return `${homeScore}-${awayScore}`
+    if (predType === 'ou_goals')     return ouPick
+    if (predType === 'double_chance') return dcPick
+    if (predType === 'draw_no_bet')  return dnbPick
+    return ''
+  }
+
+  function getSelectionLabel(): string {
+    if (predType === 'result')       return resultPick === '1' ? `${match.home_team} Win` : resultPick === 'X' ? 'Draw' : `${match.away_team} Win`
+    if (predType === 'btts')         return bttsPick === 'yes' ? 'Both Score' : 'Clean Sheet'
+    if (predType === 'exact_score')  return `${homeScore}–${awayScore}`
+    if (predType === 'ou_goals')     return `${ouPick === 'over' ? 'Over' : 'Under'} ${ouLine}`
+    if (predType === 'double_chance') return dcPick
+    if (predType === 'draw_no_bet')  return dnbPick === '1' ? `${match.home_team} (DNB)` : `${match.away_team} (DNB)`
+    return getValue()
+  }
+
+  const marketTypeForApi = predType === 'result' ? '1x2' : predType
+
+  // Pricing inputs for the market registry (new markets)
+  const pricingInputs: MatchPricingInputs = {
+    status: match.status === 'live' ? 'live' : 'scheduled',
+    expectedHomeGoals: baseOdds.homeExp,
+    expectedAwayGoals: baseOdds.awayExp,
+    homeScore: match.home_score ?? undefined,
+    awayScore: match.away_score ?? undefined,
+    kickoffAt: match.kickoff_at,
+  }
+
   // Decimal odds for the currently selected pick
   function currentDecimalOdds(): number {
     if (predType === 'result') {
@@ -78,12 +124,15 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
     if (predType === 'btts') {
       return bttsPick === 'yes' ? baseOdds.bttsYes : baseOdds.bttsNo
     }
-    // exact_score — for live matches, condition on the goals already scored
-    const h = parseInt(homeScore) || 0
-    const a = parseInt(awayScore) || 0
-    const curHome = match.status === 'live' ? (match.home_score ?? 0) : 0
-    const curAway = match.status === 'live' ? (match.away_score ?? 0) : 0
-    return exactScoreDecimalOdds(baseOdds.homeExp, baseOdds.awayExp, h, a, curHome, curAway)
+    if (predType === 'exact_score') {
+      const h = parseInt(homeScore) || 0
+      const a = parseInt(awayScore) || 0
+      const curHome = match.status === 'live' ? (match.home_score ?? 0) : 0
+      const curAway = match.status === 'live' ? (match.away_score ?? 0) : 0
+      return exactScoreDecimalOdds(baseOdds.homeExp, baseOdds.awayExp, h, a, curHome, curAway)
+    }
+    // New markets: price via registry
+    return priceLeg(pricingInputs, marketTypeForApi as Parameters<typeof priceLeg>[1], getParams(), getValue())
   }
 
   const decOdds    = currentDecimalOdds()
@@ -138,12 +187,6 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
 
   const formDisabled = isLocked || alreadyPlaced || oddsMissing || tooEarly
 
-  function getValue() {
-    if (predType === 'result') return resultPick
-    if (predType === 'btts') return bttsPick
-    return `${homeScore}-${awayScore}`
-  }
-
   useEffect(() => {
     if (!existing) return
     const v = existing.predicted_value
@@ -159,25 +202,40 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
     setReasoning(existing.reasoning ?? '')
   }, [predType])
 
+  function handleAddToSlip() {
+    if (formDisabled || pickImpossible) return
+    const marketLabels: Record<string, string> = {
+      result: 'Match Result', btts: 'Both Teams Score', exact_score: 'Exact Score',
+      ou_goals: `Goals O/U ${ouLine}`, double_chance: 'Double Chance', draw_no_bet: 'Draw No Bet',
+    }
+    addLeg({
+      matchId: match.id,
+      matchLabel: `${match.home_team} vs ${match.away_team}`,
+      kickoffAt: match.kickoff_at,
+      marketType: marketTypeForApi,
+      marketLabel: marketLabels[predType] ?? predType,
+      params: getParams(),
+      selection: getValue(),
+      selectionLabel: getSelectionLabel(),
+      decimalOdds: decOdds,
+    })
+    onClose()
+  }
+
   async function handleSubmit() {
     if (!authUser || formDisabled || pickImpossible) return
     setError(''); setLoading(true)
 
     // All validation + odds recomputation happens server-side in place_bet_v2.
-    // Client-supplied odds are ignored; the server reprices from the matches row.
-    const marketType = predType === 'result' ? '1x2' : predType
     const { error: err } = await supabase.rpc('place_bet_v2', {
       p_league_id:         leagueId,
-      p_legs:              [{ match_id: match.id, market_type: marketType, params: {}, selection: getValue() }],
+      p_legs:              [{ match_id: match.id, market_type: marketTypeForApi, params: getParams(), selection: getValue() }],
       p_stake:             points,
       p_double_or_nothing: dbl,
       p_reasoning:         reasoning.trim() || null,
     })
 
     if (err) {
-      // Surface the postgres RAISE messages verbatim — they're
-      // user-readable ("bets open 180 min before kickoff", "matchday budget
-      // exceeded", "BTTS No is impossible — both teams have scored", …).
       setError(err.message.replace(/^.*?:\s*/, ''))
     } else {
       onSuccess()
@@ -273,27 +331,30 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
 
           {/* Type selector */}
           <div>
-            <p className="label">Prediction Type</p>
-            <div className="space-y-2">
+            <p className="label">Market</p>
+            <div className="flex gap-2 overflow-x-auto -mx-5 px-5 pb-1" style={{ scrollbarWidth: 'none' }}>
               {([
-                { type: 'result'      as PredictionType, label: 'Match Result',     sub: '1 / X / 2', oddsRange: `${fmtOdds(Math.min(baseOdds.home, baseOdds.away))} – ${fmtOdds(Math.max(baseOdds.home, baseOdds.away))}` },
-                { type: 'btts'        as PredictionType, label: 'Both Teams Score', sub: 'Yes / No',   oddsRange: `${fmtOdds(Math.min(baseOdds.bttsYes, baseOdds.bttsNo))} – ${fmtOdds(Math.max(baseOdds.bttsYes, baseOdds.bttsNo))}` },
-                { type: 'exact_score' as PredictionType, label: 'Exact Score',      sub: 'e.g. 2 – 1', oddsRange: 'varies' },
+                { type: 'result'        as PredictionType, label: 'Result',    sub: '1/X/2' },
+                { type: 'btts'          as PredictionType, label: 'BTTS',      sub: 'Yes/No' },
+                { type: 'ou_goals'      as PredictionType, label: 'O/U Goals', sub: `${ouLine}` },
+                { type: 'double_chance' as PredictionType, label: 'Dbl Chance',sub: '1X/X2/12' },
+                { type: 'draw_no_bet'   as PredictionType, label: 'DNB',       sub: 'Draw=void' },
+                { type: 'exact_score'   as PredictionType, label: 'Exact',     sub: 'Score' },
               ]).map(t => {
                 const placedThisType = existingPredictions.some(p => p.prediction_type === t.type)
+                const inSlip = hasLeg(match.id, t.type === 'result' ? '1x2' : t.type)
                 return (
                   <button key={t.type} onClick={() => setPredType(t.type)} disabled={isLocked}
-                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all duration-100 ${
+                    className={`flex-shrink-0 flex flex-col items-center px-3.5 py-2.5 rounded-xl border transition-all duration-100 ${
                       predType === t.type ? 'border-accent/40 bg-accent/5' : 'border-border hover:border-white/10'
                     }`}>
-                    <div className="text-left">
-                      <p className="text-sm font-semibold text-text flex items-center gap-2">
-                        {t.label}
-                        {placedThisType && <span className="text-[9px] font-bold uppercase tracking-wider text-accent">Placed</span>}
-                      </p>
-                      <p className="text-xs text-muted mt-0.5">{t.sub}</p>
-                    </div>
-                    <span className="text-xs font-mono text-muted/60 ml-3">{t.oddsRange}</span>
+                    <p className={`text-[11px] font-bold leading-tight ${predType === t.type ? 'text-accent' : 'text-text'}`}>{t.label}</p>
+                    <p className="text-[10px] text-muted/60 mt-0.5">{t.sub}</p>
+                    {(placedThisType || inSlip) && (
+                      <span className={`text-[8px] font-bold uppercase tracking-wider mt-1 ${inSlip ? 'text-amber-400' : 'text-accent'}`}>
+                        {inSlip ? 'In slip' : 'Placed'}
+                      </span>
+                    )}
                   </button>
                 )
               })}
@@ -380,6 +441,80 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
                 </div>
               </div>
             )}
+
+            {predType === 'ou_goals' && (
+              <div className="space-y-3">
+                {/* Line selector */}
+                <div className="flex gap-1.5 justify-center">
+                  {[0.5, 1.5, 2.5, 3.5, 4.5].map(l => (
+                    <button key={l} onClick={() => setOuLine(l)} disabled={formDisabled}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-mono font-bold border transition-all ${
+                        ouLine === l ? 'border-accent/50 bg-accent/10 text-accent' : 'border-border text-muted hover:border-white/15'
+                      }`}>{l}</button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['over', 'under'] as const).map(v => {
+                    const d = priceLeg(pricingInputs, 'ou_goals', { line: ouLine }, v)
+                    return (
+                      <button key={v} onClick={() => setOuPick(v)} disabled={formDisabled}
+                        className={`py-4 rounded-xl border text-center transition-all duration-100 ${
+                          ouPick === v ? 'border-accent/50 bg-accent/10' : 'border-border hover:border-white/15'
+                        }`}>
+                        <div className={`font-bold text-sm ${ouPick === v ? 'text-accent' : 'text-text'}`}>
+                          {v === 'over' ? '⬆ Over' : '⬇ Under'} {ouLine}
+                        </div>
+                        <div className={`text-[11px] font-mono mt-1 ${ouPick === v ? 'text-accent/70' : 'text-muted/60'}`}>{fmtOdds(d)}</div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {predType === 'double_chance' && (
+              <div className="space-y-2">
+                {([
+                  { v: '1X' as const, label: `1X · ${match.home_team} or Draw` },
+                  { v: 'X2' as const, label: `X2 · Draw or ${match.away_team}` },
+                  { v: '12' as const, label: `12 · ${match.home_team} or ${match.away_team}` },
+                ] as const).map(({ v, label }) => {
+                  const d = priceLeg(pricingInputs, 'double_chance', {}, v)
+                  return (
+                    <button key={v} onClick={() => setDcPick(v)} disabled={formDisabled}
+                      className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all duration-100 ${
+                        dcPick === v ? 'border-accent/50 bg-accent/10' : 'border-border hover:border-white/15'
+                      }`}>
+                      <span className={`text-sm font-semibold ${dcPick === v ? 'text-accent' : 'text-text'}`}>{label}</span>
+                      <span className={`text-xs font-mono ${dcPick === v ? 'text-accent/70' : 'text-muted/60'}`}>{fmtOdds(d)}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {predType === 'draw_no_bet' && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted/60 text-center">Draw returns your stake — only home or away wins count.</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { v: '1' as const, label: match.home_team },
+                    { v: '2' as const, label: match.away_team },
+                  ] as const).map(({ v, label }) => {
+                    const d = priceLeg(pricingInputs, 'draw_no_bet', {}, v)
+                    return (
+                      <button key={v} onClick={() => setDnbPick(v)} disabled={formDisabled}
+                        className={`py-4 rounded-xl border text-center transition-all duration-100 ${
+                          dnbPick === v ? 'border-accent/50 bg-accent/10' : 'border-border hover:border-white/15'
+                        }`}>
+                        <div className={`font-bold text-sm truncate px-2 ${dnbPick === v ? 'text-accent' : 'text-text'}`}>{label}</div>
+                        <div className={`text-[11px] font-mono mt-1 ${dnbPick === v ? 'text-accent/70' : 'text-muted/60'}`}>{fmtOdds(d)}</div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Wager */}
@@ -457,28 +592,39 @@ export function PredictionModal({ match, leagueId, existingPredictions, hasUsedD
 
           {error && <p className="text-danger text-sm">{error}</p>}
 
-          <button onClick={handleSubmit}
-            disabled={loading || formDisabled || pickImpossible}
-            className="btn-primary w-full justify-center text-center py-3">
-            {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="w-3.5 h-3.5 border-2 border-bg/40 border-t-bg rounded-full animate-spin" />
-                Saving…
-              </span>
-            ) : alreadyPlaced
-              ? 'Bet locked in'
-              : isLive
-                ? 'Bets closed — match is live'
-                : match.status === 'finished' || match.status === 'postponed'
-                  ? 'Match is over'
-                  : tooEarly
-                    ? 'Bets open 24h before kickoff'
-                    : oddsMissing
-                      ? 'Loading odds…'
-                      : pickImpossible
-                        ? 'Pick is impossible'
-                        : 'Lock In'}
-          </button>
+          <div className="flex gap-2">
+            {/* Add to slip — for building parlays across matches */}
+            {!alreadyPlaced && !isLocked && !oddsMissing && !tooEarly && !pickImpossible && (
+              <button onClick={handleAddToSlip}
+                className="flex items-center gap-1.5 px-4 py-3 rounded-xl border border-border hover:border-white/15 text-sm font-semibold text-text transition-colors flex-shrink-0">
+                <PlusCircle size={15} />
+                Slip
+              </button>
+            )}
+
+            <button onClick={handleSubmit}
+              disabled={loading || formDisabled || pickImpossible}
+              className="btn-primary flex-1 justify-center text-center py-3">
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-3.5 h-3.5 border-2 border-bg/40 border-t-bg rounded-full animate-spin" />
+                  Saving…
+                </span>
+              ) : alreadyPlaced
+                ? 'Bet locked in'
+                : isLive
+                  ? 'Bets closed — match is live'
+                  : match.status === 'finished' || match.status === 'postponed'
+                    ? 'Match is over'
+                    : tooEarly
+                      ? 'Bets open 24h before kickoff'
+                      : oddsMissing
+                        ? 'Loading odds…'
+                        : pickImpossible
+                          ? 'Pick is impossible'
+                          : 'Lock In'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

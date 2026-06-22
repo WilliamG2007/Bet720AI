@@ -14,6 +14,9 @@
 import './result'
 import './btts'
 import './exactScore'
+import './ouGoals'
+import './doubleChance'
+import './drawNoBet'
 
 // Public surface: types + registry helpers.
 export type {
