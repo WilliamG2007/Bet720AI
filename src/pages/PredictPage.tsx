@@ -22,6 +22,12 @@ export default function PredictPage() {
   const { activeLeague } = useLeague()
   const [matches, setMatches] = useState<Match[]>([])
   const [predictions, setPredictions] = useState<Prediction[]>([])
+  // Today's true budget usage — each leg counts as `stake` against the
+  // 100-pt daily cap (so a 3-leg parlay at 25 = 75 pts used). The legacy
+  // predictions VIEW only returns singles, so we read bets+bet_legs
+  // directly here to include parlays.
+  const [pointsUsed, setPointsUsed] = useState(0)
+  const [hasUsedDouble, setHasUsedDouble] = useState(false)
   const [selected, setSelected] = useState<Match | null>(null)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
@@ -57,6 +63,24 @@ export default function PredictPage() {
     setPredictions((data ?? []) as Prediction[])
   }
 
+  // Compute today's budget usage directly from bets + bet_legs so parlay
+  // legs (which the predictions VIEW filters out) are counted.
+  async function loadTodaysBudget() {
+    if (!authUser || !activeLeague) return
+    const dayStart = new Date()
+    dayStart.setUTCHours(0, 0, 0, 0)
+    const { data } = await supabase
+      .from('bets')
+      .select('stake, double_or_nothing, bet_legs(id)')
+      .eq('user_id', authUser.id)
+      .eq('league_id', activeLeague.id)
+      .gte('created_at', dayStart.toISOString())
+    const rows = (data ?? []) as Array<{ stake: number; double_or_nothing: boolean; bet_legs: { id: string }[] }>
+    const used = rows.reduce((sum, b) => sum + b.stake * (b.bet_legs?.length || 1), 0)
+    setPointsUsed(used)
+    setHasUsedDouble(rows.some(b => b.double_or_nothing))
+  }
+
   async function handleSync() {
     setSyncing(true)
     await syncUpcomingMatches()
@@ -64,7 +88,7 @@ export default function PredictPage() {
     setSyncing(false)
   }
 
-  useEffect(() => { loadMatches(); loadPredictions() }, [authUser, activeLeague])
+  useEffect(() => { loadMatches(); loadPredictions(); loadTodaysBudget() }, [authUser, activeLeague])
 
   // Group by calendar day. Insertion order = chronological because the
   // matches array is already sorted by kickoff_at ascending.
@@ -73,18 +97,6 @@ export default function PredictPage() {
     ;(acc[key] ??= []).push(m)
     return acc
   }, {})
-
-  // Daily budget — sums only today's bets (UTC midnight reset, matches
-  // the place_bet RPC). Each user gets a fresh 100 pts to spread across
-  // each day's fixtures.
-  const dayStartMs = (() => {
-    const d = new Date()
-    d.setUTCHours(0, 0, 0, 0)
-    return d.getTime()
-  })()
-  const todayPreds = predictions.filter(p => new Date(p.created_at).getTime() >= dayStartMs)
-  const pointsUsed = todayPreds.reduce((s, p) => s + p.points_wagered, 0)
-  const hasUsedDouble = todayPreds.some(p => p.double_or_nothing)
 
   if (!activeLeague) return (
     <div className="flex-1 flex items-center justify-center p-8 text-center">
@@ -178,7 +190,7 @@ export default function PredictPage() {
           existingPredictions={predictions.filter(p => p.match_id === selected.id)}
           hasUsedDoubleOrNothing={hasUsedDouble}
           onClose={() => setSelected(null)}
-          onSuccess={() => { setSelected(null); loadPredictions() }}
+          onSuccess={() => { setSelected(null); loadPredictions(); loadTodaysBudget() }}
         />
       )}
     </div>
